@@ -18,7 +18,7 @@
             v-for="item in menuItems"
             :key="item.path"
             :class="['menu-item', { active: activeMenu === item.path }]"
-            @click="activeMenu = item.path"
+            @click="(activeMenu = item.path, router.push(item.path))"
           >
             {{ item.name }}
           </div>
@@ -26,7 +26,7 @@
       </aside>
       <!-- 右侧主内容区 -->
       <main class="content">
-        <Home />
+        <RouterView />
       </main>
     </div>
   </div>
@@ -35,9 +35,8 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import Home from './Home.vue'
 
-const activeMenu = ref('/home')
+const activeMenu = ref('/main/home')
 const currentUser = ref(localStorage.getItem('username') || '')
 const router = useRouter()
 const handleLogout = () => {
@@ -47,18 +46,18 @@ const handleLogout = () => {
 }
 
 const menuItems = [
-  { name: '首页', path: '/home' },
-  { name: '配置管理', path: '/config' },
-  { name: '用例管理', path: '/case' },
-  { name: '执行测试', path: '/execute' },
-  { name: '测试报告', path: '/report' },
-  { name: '平台操作指南', path: '/guide' }
+  { name: '首页', path: '/main/home' },
+  { name: '配置管理', path: '/main/config' },
+  { name: '用例管理', path: '/main/case' },
+  { name: '执行测试', path: '/main/execute' },
+  { name: '测试报告', path: '/main/report' },
+  { name: '平台操作指南', path: '/main/guide' }
 ]
+
 </script>
 
 <style scoped>
 .app-container {
-  width: 100%;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -99,6 +98,8 @@ const menuItems = [
   flex: 1;
   display: flex;
   overflow: hidden;
+  width: calc(180px + 1200px);
+  margin: 0 auto;
 }
 
 .sidebar {
@@ -140,6 +141,7 @@ const menuItems = [
   flex: 1;
   overflow-y: auto;
   padding: 0;
+  width: 1200px;
 }
 .content::-webkit-scrollbar {
   width: 0;

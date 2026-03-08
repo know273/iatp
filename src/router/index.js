@@ -1,7 +1,7 @@
 // 1. 导入路由核心API
 import { createRouter, createWebHistory } from 'vue-router'
 // 2. 导入需要映射的页面组件
-import Home from '../components/Home.vue'
+import Home from '../components/home.vue'
 import Login from '../components/login.vue'
 import Main from '../components/main.vue'
 import Config from '../components/config.vue'

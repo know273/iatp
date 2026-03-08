@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 const apiUrl = ref('')
 const apiFile = ref(null)
@@ -7,11 +7,19 @@ const outputName = ref('autointerface_test_cases')
 const genOpen = ref(true)
 const generating = ref(false)
 const genError = ref('')
-const apiBase = localStorage.getItem('apiBase') || 'http://192.168.8.136:5000'
+const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
 
 const onPickFile = (e) => {
   const f = e.target.files && e.target.files[0]
   apiFile.value = f || null
+}
+const toAbsUrl = (base, rel) => {
+  const p = String(rel || '').replace(/^\\+|^\/+/, '').replace(/\\/g, '/')
+  return base.replace(/\/$/, '') + '/' + p
+}
+const baseName = (p) => {
+  const segs = String(p).split(/[\\\/]/)
+  return segs[segs.length - 1] || p
 }
 const genFromApiDoc = async () => {
   genError.value = ''
@@ -25,14 +33,16 @@ const genFromApiDoc = async () => {
     fd.append('output_name', outputName.value || 'autointerface_test_cases')
     if (apiFile.value) fd.append('file', apiFile.value)
     if (apiUrl.value) fd.append('doc_url', apiUrl.value)
-    const res = await fetch(`${apiBase}/api/cases/generate-from-doc`, {
+    const res = await fetch(`${apiBase.value}/api/cases/generate-from-doc`, {
       method: 'POST',
       body: fd
     })
     if (!res.ok) throw new Error('生成失败')
     const data = await res.json()
+    const path = data.file_path || data.file_name || ''
     const item = {
-      name: data.file_path || data.file_name || outputName.value + '.csv',
+      name: baseName(path || outputName.value + '.csv'),
+      url: path ? toAbsUrl(apiBase.value, path) : '',
       type: 'CSV',
       size: data.size || '未知',
       time: data.time || new Date().toISOString().replace('T',' ').slice(0,19)
@@ -48,11 +58,26 @@ const toggleGen = () => {
   genOpen.value = !genOpen.value
 }
 
-const uploadedFiles = ref([
-  { name: 'uploads\\user_33\\news-csv.csv', type: 'CSV', size: '0.02 KB', time: '2026-02-19 09:46:34' }
-])
+const uploadedFiles = ref([])
+const loadFiles = async () => {
+  try {
+    const res = await fetch(`${apiBase.value}/api/cases/files`)
+    if (!res.ok) return
+    const data = await res.json()
+    const files = Array.isArray(data.files) ? data.files : []
+    uploadedFiles.value = files.map(x => ({
+      name: x.file_name || '',
+      type: 'CSV',
+      size: x.size || '',
+      time: x.time || '',
+      url: toAbsUrl(apiBase.value, x.file_path || '')
+    }))
+  } catch (_) {
+  }
+}
+onMounted(loadFiles)
 const downloadFile = (f) => {
-  alert('下载: ' + f.name)
+  if (f && f.url) window.open(f.url, '_blank')
 }
 const deleteFile = (f) => {
   uploadedFiles.value = uploadedFiles.value.filter(x => x !== f)

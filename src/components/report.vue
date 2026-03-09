@@ -1,20 +1,14 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
-const reports = ref([
-  {
-    reportName: 'test_report_20260219_222409.html',
-    size: '44035 bytes',
-    createdAt: '2026-02-19 22:24:09'
-  },
-  {
-    reportName: 'test_report_20260219_203608.html',
-    size: '44035 bytes',
-    createdAt: '2026-02-19 20:36:08'
-  }
-])
+const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
+const toAbsUrl = (base, rel) => {
+  const p = String(rel || '').replace(/^\\+|^\/+/, '').replace(/\\/g, '/')
+  return String(base).replace(/\/$/, '') + '/' + p
+}
+const reports = ref([])
 
 const ensureQueryReport = () => {
   const name = route.query?.name
@@ -31,7 +25,7 @@ const ensureQueryReport = () => {
 ensureQueryReport()
 
 const openReport = (item) => {
-  const url = `/reports/${item.reportName}`
+  const url = toAbsUrl(apiBase.value, `/reports/${item.reportName}`)
   window.open(url, '_blank')
 }
 
@@ -53,6 +47,22 @@ const downloadJSON = (item) => {
     size: item.size,
     createdAt: item.createdAt
   }
+  // 已在外层声明 blob，此处无需重复声明
+
+const loadReports = async () => {
+  try {
+    const res = await fetch(`${apiBase.value}/api/reports/files`)
+    if (!res.ok) return
+    const data = await res.json()
+    const arr = Array.isArray(data.reports) ? data.reports : []
+    reports.value = arr.map(x => ({
+      reportName: x.report_name,
+      size: x.size,
+      createdAt: x.createdAt
+    }))
+  } catch (_) {}
+}
+onMounted(loadReports)
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)

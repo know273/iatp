@@ -1,8 +1,14 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 
-const files = ref(['uploads\\user_33\\news-csv.csv'])
+const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
+const toAbsUrl = (base, rel) => {
+  const p = String(rel || '').replace(/^\\+|^\/+/, '').replace(/\\/g, '/')
+  return `${String(base).replace(/\/$/, '')}/${p}`
+}
+
+const files = ref([])
 const selectedFile = ref(files.value[0] || '')
 const env = ref('test')
 const concurrency = ref(1)
@@ -41,30 +47,40 @@ const baseName = (p) => {
   return segs[segs.length - 1] || ''
 }
 
-const startRun = () => {
+const startRun = async () => {
+  if (!selectedFile.value) return
   running.value = true
   success.value = false
-  setTimeout(() => {
-    running.value = false
-    success.value = true
+  try {
+    const body = {
+      file_path: selectedFile.value,
+      env: env.value,
+      concurrency: Number(concurrency.value) || 1
+    }
+    const res = await fetch(`${apiBase.value}/api/execute/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    if (!res.ok) throw new Error('执行失败')
+    const data = await res.json()
     const now = new Date()
-    const nameStamp = formatForName(now)
-    const report = `test_report_${nameStamp}.html`
-    const total = Math.max(1, Number(concurrency.value) || 1)
-    const passed = total
-    const failed = 0
-    const passRate = `${((passed / total) * 100).toFixed(2)}%`
     history.value.unshift({
       executedAt: formatTime(now),
       fileName: baseName(selectedFile.value),
-      reportName: report,
-      total,
-      passed,
-      failed,
-      passRate,
-      reportUrl: `/reports/${report}`
+      reportName: data.report_name,
+      total: data.total,
+      passed: data.passed,
+      failed: data.failed,
+      passRate: data.pass_rate,
+      reportUrl: data.report_url
     })
-  }, 1200)
+    success.value = true
+  } catch (e) {
+    success.value = false
+  } finally {
+    running.value = false
+  }
 }
 
 const clearHistory = () => {
@@ -73,6 +89,18 @@ const clearHistory = () => {
 const viewReport = (item) => {
   router.push({ path: '/main/report', query: { name: item.reportName } })
 }
+
+const loadFiles = async () => {
+  try {
+    const res = await fetch(`${apiBase.value}/api/cases/files`)
+    if (!res.ok) return
+    const data = await res.json()
+    const arr = Array.isArray(data.files) ? data.files : []
+    files.value = arr.map(x => x.file_path || '').filter(Boolean)
+    selectedFile.value = files.value[0] || ''
+  } catch (_) {}
+}
+loadFiles()
 </script>
 
 <template>

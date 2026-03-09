@@ -1,10 +1,17 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import CollapseCard from './ui/CollapseCard.vue'
+import Pagination from './ui/Pagination.vue'
+import Toast from './ui/Toast.vue'
+import caretBottom from '../assets/caret-bottom-svgrepo-com.svg'
 
 const apiUrl = ref('')
 const apiFile = ref(null)
 const outputName = ref('autointerface_test_cases')
 const genOpen = ref(true)
+const uploadOpen = ref(true)
+const filesOpen = ref(true)
+const tplOpen = ref(true)
 const generating = ref(false)
 const genError = ref('')
 const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
@@ -12,6 +19,11 @@ const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.get
 const onPickFile = (e) => {
   const f = e.target.files && e.target.files[0]
   apiFile.value = f || null
+}
+const upFile = ref(null)
+const onPickUpload = (e) => {
+  const f = e.target.files && e.target.files[0]
+  upFile.value = f || null
 }
 const toAbsUrl = (base, rel) => {
   const p = String(rel || '').replace(/^\\+|^\/+/, '').replace(/\\/g, '/')
@@ -48,6 +60,9 @@ const genFromApiDoc = async () => {
       time: data.time || new Date().toISOString().replace('T',' ').slice(0,19)
     }
     uploadedFiles.value.unshift(item)
+    toastType.value = 'success'
+    toastMsg.value = '生成成功'
+    toastShow.value = true
   } catch (e) {
     genError.value = '生成失败'
   } finally {
@@ -57,8 +72,38 @@ const genFromApiDoc = async () => {
 const toggleGen = () => {
   genOpen.value = !genOpen.value
 }
+const toggleUpload = () => {
+  uploadOpen.value = !uploadOpen.value
+}
+const toggleFiles = () => {
+  filesOpen.value = !filesOpen.value
+}
+const toggleTpl = () => {
+  tplOpen.value = !tplOpen.value
+}
 
 const uploadedFiles = ref([])
+const pageSize = 10
+const currentPage = ref(1)
+const totalItems = computed(() => uploadedFiles.value.length)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / pageSize)))
+const displayedFiles = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return uploadedFiles.value.slice(start, start + pageSize)
+})
+const visiblePages = computed(() => {
+  const tp = totalPages.value
+  if (tp <= 4) return Array.from({ length: tp }, (_, i) => i + 1)
+  let start = Math.max(1, currentPage.value - 1)
+  if (start + 3 > tp) start = tp - 3
+  return [start, start + 1, start + 2, start + 3]
+})
+const gotoPage = (p) => {
+  if (p < 1 || p > totalPages.value) return
+  currentPage.value = p
+}
+const prevPage = () => gotoPage(currentPage.value - 1)
+const nextPage = () => gotoPage(currentPage.value + 1)
 const loadFiles = async () => {
   try {
     const res = await fetch(`${apiBase.value}/api/cases/files`)
@@ -72,15 +117,50 @@ const loadFiles = async () => {
       time: x.time || '',
       url: toAbsUrl(apiBase.value, x.file_path || '')
     }))
+    currentPage.value = 1
   } catch (_) {
   }
 }
 onMounted(loadFiles)
+watch(uploadedFiles, () => {
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+})
 const downloadFile = (f) => {
   if (f && f.url) window.open(f.url, '_blank')
 }
 const deleteFile = (f) => {
   uploadedFiles.value = uploadedFiles.value.filter(x => x !== f)
+}
+const toastShow = ref(false)
+const toastMsg = ref('')
+const toastType = ref('success')
+const uploading = ref(false)
+const uploadError = ref('')
+const uploadCase = async () => {
+  uploadError.value = ''
+  if (!upFile.value) {
+    uploadError.value = '请选择文件'
+    return
+  }
+  uploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', upFile.value)
+    const res = await fetch(`${apiBase.value}/api/cases/upload`, {
+      method: 'POST',
+      body: fd
+    })
+    if (!res.ok) throw new Error('上传失败')
+    await loadFiles()
+    upFile.value = null
+    toastType.value = 'success'
+    toastMsg.value = '上传成功'
+    toastShow.value = true
+  } catch (e) {
+    uploadError.value = '上传失败'
+  } finally {
+    uploading.value = false
+  }
 }
 
 const columns = ref([
@@ -133,13 +213,17 @@ const downloadCsvTpl = () => {
 
 <template>
   <div class="case-page">
+    <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
     <div class="case-header">用例管理</div>
     <div class="case-desc">管理测试用例文件，支持上传、查看和编辑测试用例</div>
 
     <section class="card">
-      <div class="card-title" @click="toggleGen">
+      <div class="card-title title-fit" @click="toggleGen">
         从API文档生成测试用例
-        <span class="arrow">{{ genOpen ? '▼' : '▲' }}</span>
+        <span class="arrow" aria-hidden="true">
+          <img v-if="genOpen" class="arrow-icon" :src="caretBottom" width="16" height="16" alt="向下" />
+          <img v-else class="arrow-icon" :src="caretBottom" width="16" height="16" style="transform: rotate(-90deg);" alt="向右" />
+        </span>
       </div>
       <div v-show="genOpen" class="card-body">
         <div class="form-item">
@@ -176,27 +260,32 @@ const downloadCsvTpl = () => {
     </section>
 
     <section class="card">
-      <div class="card-title">上传测试用例</div>
-      <div class="card-body">
+      <div class="card-title title-fit" @click="toggleUpload">
+        上传测试用例
+        <span class="arrow" aria-hidden="true">
+          <img v-if="uploadOpen" class="arrow-icon" :src="caretBottom" width="16" height="16" alt="向下" />
+          <img v-else class="arrow-icon" :src="caretBottom" width="16" height="16" style="transform: rotate(-90deg);" alt="向右" />
+        </span>
+      </div>
+      <div v-show="uploadOpen" class="card-body">
         <div class="form-item">
           <label class="label">选择文件</label>
           <div class="file-line">
             <label class="btn upload">
               选择文件
-              <input class="hidden-file" type="file" accept=".json,.xlsx,.csv" />
+              <input class="hidden-file" type="file" accept=".json,.xlsx,.csv" @change="onPickUpload" />
             </label>
-            <span class="file-name">未选择任何文件</span>
+            <span class="file-name">{{ upFile ? upFile.name : '未选择任何文件' }}</span>
           </div>
         </div>
         <div>
-          <button class="btn primary">上传</button>
+          <button class="btn primary" :disabled="uploading" @click="uploadCase">{{ uploading ? '上传中' : '上传' }}</button>
+          <span class="gen-error" v-if="uploadError" style="margin-left:8px">{{ uploadError }}</span>
         </div>
       </div>
     </section>
 
-    <section class="card">
-      <div class="card-title">测试用例文件</div>
-      <div class="card-body">
+    <CollapseCard v-model="filesOpen" title="测试用例文件">
         <table class="table">
           <thead>
             <tr>
@@ -208,7 +297,7 @@ const downloadCsvTpl = () => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="f in uploadedFiles" :key="f.name">
+            <tr v-for="f in displayedFiles" :key="f.name">
               <td>{{ f.name }}</td>
               <td>{{ f.type }}</td>
               <td>{{ f.size }}</td>
@@ -223,12 +312,10 @@ const downloadCsvTpl = () => {
             </tr>
           </tbody>
         </table>
-      </div>
-    </section>
+        <Pagination v-model="currentPage" :total="totalItems" :page-size="pageSize" />
+      </CollapseCard>
 
-    <section class="card">
-      <div class="card-title">用例模板</div>
-      <div class="card-body">
+    <CollapseCard v-model="tplOpen" title="用例模板">
         <div class="tool-line">
           <button class="btn primary" @click="downloadCsvTpl">下载CSV模板</button>
           <button class="btn success" @click="addCol">新增列</button>
@@ -257,8 +344,7 @@ const downloadCsvTpl = () => {
             </tr>
           </tbody>
         </table>
-      </div>
-    </section>
+      </CollapseCard>
   </div>
 </template>
 
@@ -295,16 +381,31 @@ const downloadCsvTpl = () => {
   font-size: 16px;
   font-weight: 600;
   padding: 14px 16px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid #cb9595;
   display: flex;
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
   text-align: left;
+  color:#2DB36A
+}
+.card-title.title-fit {
+  display: inline-flex;
+  width: fit-content;
+  box-sizing: content-box;
+  gap: 8px;
 }
 .arrow {
-  color: #999;
+  color: #ef5454;
   font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+}
+.arrow-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  transition: transform 0.2s ease;
 }
 .card-body {
   padding: 16px;
@@ -347,7 +448,10 @@ const downloadCsvTpl = () => {
   background: #f9f9f9;
   cursor: pointer;
   font-size: 14px;
-  text-align: left;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .btn.primary {
   color: #fff;

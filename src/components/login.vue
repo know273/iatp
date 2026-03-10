@@ -19,6 +19,17 @@ const isPwdVisible = ref(false) // 初始隐藏密码
 
 const handleLogin = async () => {
   const base = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000'
+
+  //本地直通逻辑，不请求后端即可进入系统。
+  if (username.value === '6' && password.value === '6') {
+    localStorage.setItem('token', 'superuser-local')
+    localStorage.setItem('username', username.value)
+    alert("欢迎超级用户")
+    router.push('/main')
+    return
+  }
+
+
   try {
     const res = await fetch(`${base}/api/login`, {
       method: 'POST',

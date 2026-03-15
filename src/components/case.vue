@@ -4,9 +4,12 @@ import CollapseCard from './ui/CollapseCard.vue'
 import Pagination from './ui/Pagination.vue'
 import Toast from './ui/Toast.vue'
 import caretBottom from '../assets/caret-bottom-svgrepo-com.svg'
+import bookOpen from '../assets/book-open-svgrepo-com.svg'
+import circleCross from '../assets/circle-cross-svgrepo-com.svg'
 
 const apiUrl = ref('')
 const apiFile = ref(null)
+const apiFileInput = ref(null)
 const outputName = ref('autointerface_test_cases')
 const genOpen = ref(true)
 const uploadOpen = ref(true)
@@ -20,10 +23,19 @@ const onPickFile = (e) => {
   const f = e.target.files && e.target.files[0]
   apiFile.value = f || null
 }
+const clearApiFile = () => {
+  apiFile.value = null
+  if (apiFileInput.value) apiFileInput.value.value = ''
+}
 const upFile = ref(null)
+const upFileInput = ref(null)
 const onPickUpload = (e) => {
   const f = e.target.files && e.target.files[0]
   upFile.value = f || null
+}
+const clearUpFile = () => {
+  upFile.value = null
+  if (upFileInput.value) upFileInput.value.value = ''
 }
 const toAbsUrl = (base, rel) => {
   const p = String(rel || '').replace(/^\\+|^\/+/, '').replace(/\\/g, '/')
@@ -34,6 +46,14 @@ const baseName = (p) => {
   return segs[segs.length - 1] || p
 }
 const genFromApiDoc = async () => {
+  //为“输出文件名”添加了校验逻辑。
+  const reg = /^[a-zA-Z0-9_]+$/
+  if (!reg.test(outputName.value)) {
+    toastType.value = 'error'
+    toastMsg.value = '仅支持大小写英文、数字、下划线组合'
+    toastShow.value = true
+    return
+  }
   genError.value = ''
   if (!apiFile.value && !apiUrl.value) {
     genError.value = '请选择文件或输入URL'
@@ -235,14 +255,20 @@ const downloadCsvTpl = () => {
           <div class="file-line">
             <label class="btn upload">
               选择文件
-              <input class="hidden-file" type="file" accept=".json,.yaml,.yml" @change="onPickFile" />
+              <input ref="apiFileInput" class="hidden-file" type="file" accept=".json,.yaml,.yml" @change="onPickFile" />
             </label>
-            <span class="file-name">{{ apiFile ? apiFile.name : '未选择任何文件' }}</span>
+            <div class="file-info-wrap">
+              <span class="file-name">{{ apiFile ? apiFile.name : '未选择任何文件' }}</span>
+              <img v-if="apiFile" :src="circleCross" class="clear-icon" @click="clearApiFile" alt="清除" />
+            </div>
           </div>
         </div>
         <div class="tips">
-          支持Swagger/OpenAPI/RAML/API Blueprint/GraphQL/Postman/WADL/gRPC/AsyncAPI格式
-          <a class="doc-link" href="javascript:void(0)">查看API文档格式说明</a>
+          支持Swagger/OpenAPI格式
+          <div class="doc-link-wrap">
+            <img :src="bookOpen" class="book-icon" width="16" height="16" alt="" />
+            <a class="doc-link" href="javascript:void(0)">查看API文档格式说明</a>
+          </div>
         </div>
         <div class="form-item">
           <label class="label">输出文件名</label>
@@ -273,9 +299,12 @@ const downloadCsvTpl = () => {
           <div class="file-line">
             <label class="btn upload">
               选择文件
-              <input class="hidden-file" type="file" accept=".json,.xlsx,.csv" @change="onPickUpload" />
+              <input ref="upFileInput" class="hidden-file" type="file" accept=".json,.xlsx,.csv" @change="onPickUpload" />
             </label>
-            <span class="file-name">{{ upFile ? upFile.name : '未选择任何文件' }}</span>
+            <div class="file-info-wrap">
+              <span class="file-name">{{ upFile ? upFile.name : '未选择任何文件' }}</span>
+              <img v-if="upFile" :src="circleCross" class="clear-icon" @click="clearUpFile" alt="清除" />
+            </div>
           </div>
         </div>
         <div>
@@ -439,6 +468,10 @@ const downloadCsvTpl = () => {
   display: flex;
   align-items: center;
   gap: 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  padding: 4px 8px;
+  width: 100%;
 }
 .btn {
   height: 36px;
@@ -475,6 +508,21 @@ const downloadCsvTpl = () => {
   color: #999;
   font-size: 14px;
 }
+.file-info-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clear-icon {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+.clear-icon:hover {
+  opacity: 1;
+}
 .tips {
   color: #666;
   font-size: 14px;
@@ -486,6 +534,16 @@ const downloadCsvTpl = () => {
 .doc-link {
   color: #1e50c8;
   text-decoration: underline;
+}
+.doc-link-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.book-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
 }
 .gen-status {
   display: flex;

@@ -98,7 +98,7 @@ const menuItems = [
   flex: 1;
   display: flex;
   overflow: hidden;
-  width: calc(180px + 1200px);
+  width: 100%;
   margin: 0 auto;
 }
 
@@ -141,7 +141,6 @@ const menuItems = [
   flex: 1;
   overflow-y: auto;
   padding: 0;
-  width: 1200px;
 }
 .content::-webkit-scrollbar {
   width: 0;

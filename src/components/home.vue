@@ -112,7 +112,7 @@ const functionCards = [
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 24px;
   padding: 0 20px;
-  max-width: 1200px;
+  width: 100%;
   margin: 0 auto;
 }
 
@@ -171,7 +171,7 @@ const functionCards = [
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 24px;
-  max-width: 1200px;
+  width: 100%;
   margin: 0 auto 40px;
 }
 
@@ -208,7 +208,7 @@ const functionCards = [
   border-radius: 12px;
   padding: 32px;
   text-align: center;
-  max-width: 1200px;
+  width: 100%;
   margin: 0 auto;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }

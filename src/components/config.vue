@@ -1,8 +1,19 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
-import ProviderEditModal from './ProviderEditModal.vue'
+import { ref, computed, watch, onMounted } from 'vue'
+import Toast from './ui/Toast.vue'
 
-const apiBase = ref(import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
+const inferApiBase = () => {
+  const saved = localStorage.getItem('apiBase')
+  if (saved) return saved
+  const env = import.meta.env.VITE_API_BASE
+  if (env) return env
+  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
+    return `${window.location.protocol}//${window.location.hostname}:5000`
+  }
+  return 'http://127.0.0.1:5000'
+}
+
+const apiBase = ref(inferApiBase())
 const saving = ref(false)
 const saved = ref(false)
 const error = ref('')
@@ -24,56 +35,331 @@ const openBase = () => {
   window.open(url, '_blank')
 }
 
-const providers = ref([
-  { id: 1, name: '火山引擎', enabled: true, icon: 'https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/34966601f07f4347916960810486f03e~tplv-k3u1fbpfcp-zoom-1.image' },
-  { id: 2, name: '腾讯云', enabled: true, icon: 'https://cloudcache.tencent-cloud.com/qcloud/ui/static/static_sources/logo/logo-light.svg' }
-])
+const defaultModels = [
+  { id: 'ds-v3', name: 'DeepSeek V3.2', tag: 'deepseek-v3-2-251201', enabled: false },
+  { id: 'ds-v3-thinking', name: 'DeepSeek V3.2 Thinking', tag: 'deepseek-v3-2-251201', enabled: false },
+  { id: 'db-seed-2-pro', name: 'Doubao-Seed-2.0-Pro', tag: 'doubao-seed-2-0-pro-260215', enabled: false },
+  { id: 'db-seed-1-lite', name: 'Doubao-Seed-1.6-lite', tag: 'doubao-seed-1-6-lite-251015', enabled: true }
+]
 
-const showEditModal = ref(false)
-const currentProvider = ref(null)
+const storeKey = 'ai_models_config'
+const models = ref([])
+const activeModelKey = ref('')
+const openModelId = ref('')
+const suppressSync = ref(false)
+const editDraft = ref(null)
+const aiSaving = ref(false)
+const serverSnapshot = ref(null)
+let activeSyncTimer = null
+const toastShow = ref(false)
+const toastMsg = ref('')
+const toastType = ref('success')
+const apiKeyFocused = ref(false)
 
-const openEditModal = (p) => {
-  currentProvider.value = { ...p }
-  showEditModal.value = true
+const showToast = (msg, type = 'success') => {
+  toastMsg.value = msg || ''
+  toastType.value = type
+  toastShow.value = true
 }
 
-const handleProviderSave = (p) => {
-  const idx = providers.value.findIndex(x => x.id === p.id)
-  if (idx > -1) {
-    providers.value[idx] = { ...p }
+const maskApiKey = (v) => {
+  const s = String(v || '')
+  if (!s) return ''
+  if (s.length <= 8) return '•'.repeat(s.length)
+  return s.slice(0, 6) + '•'.repeat(s.length - 8) + s.slice(-2)
+}
+
+const authHeaders = () => {
+  const token = localStorage.getItem('token') || ''
+  if (!token) {
+    error.value = '请先登录后再加载 AI 配置'
+    return null
   }
-  loadActiveConfig()
+  if (token.split('.').length !== 3) {
+    error.value = '登录凭证无效，请重新登录'
+    return null
+  }
+  return { Authorization: `Bearer ${token}` }
 }
 
-const activeProviderId = computed(() => providers.value.find(x => x.enabled)?.id || providers.value[0]?.id || '')
-const activeProviderConfig = ref({})
-const loadActiveConfig = () => {
-  const id = activeProviderId.value
-  if (!id) {
-    activeProviderConfig.value = {}
+const apiBaseUrl = computed(() => String(apiBase.value || '').replace(/\/$/, ''))
+const apiBaseCandidates = computed(() => {
+  const fromInput = apiBaseUrl.value
+  const inferred = typeof window !== 'undefined' && window.location && window.location.hostname
+    ? `${window.location.protocol}//${window.location.hostname}:5000`
+    : ''
+  const list = [fromInput, inferred, 'http://127.0.0.1:5000', 'http://localhost:5000'].filter(Boolean)
+  return Array.from(new Set(list))
+})
+
+const persistModelsConfig = () => {
+  localStorage.setItem(
+    storeKey,
+    JSON.stringify({
+      activeModelKey: activeModelKey.value || '',
+      models: (models.value || []).map(x => ({
+        id: x.id,
+        name: x.name || '',
+        tag: x.tag || '',
+        enabled: typeof x.enabled === 'boolean' ? x.enabled : true,
+        apiKey: x.apiKey || '',
+        endpoint: x.endpoint || '',
+        sortOrder: Number.isFinite(x.sortOrder) ? x.sortOrder : 0
+      }))
+    })
+  )
+}
+
+const loadModelsConfig = () => {
+  const tryParse = (k) => {
+    try {
+      return JSON.parse(localStorage.getItem(k) || '{}')
+    } catch (e) {
+      return {}
+    }
+  }
+  const cfg = tryParse(storeKey)
+  const legacy = tryParse('provider_1_config')
+  const list = Array.isArray(cfg.models) && cfg.models.length ? cfg.models : (Array.isArray(legacy.models) ? legacy.models : [])
+  models.value = (list && list.length ? list : defaultModels).map(x => ({
+    id: x.id,
+    name: x.name || '',
+    tag: x.tag || '',
+    enabled: typeof x.enabled === 'boolean' ? x.enabled : true,
+    apiKey: x.apiKey || '',
+    endpoint: x.endpoint || '',
+    sortOrder: Number.isFinite(x.sortOrder) ? x.sortOrder : 0
+  }))
+  activeModelKey.value =
+    cfg.activeModelKey ||
+    cfg.defaultModelId ||
+    legacy.activeModelKey ||
+    legacy.defaultModelId ||
+    models.value.find(x => x.enabled)?.id ||
+    models.value[0]?.id ||
+    ''
+  const enabledKeys = new Set(models.value.filter(x => x.enabled).map(x => x.id))
+  if (activeModelKey.value && !enabledKeys.has(activeModelKey.value)) {
+    activeModelKey.value = enabledKeys.values().next().value || ''
+  }
+  persistModelsConfig()
+}
+
+loadModelsConfig()
+
+const normalizeActiveModel = () => {
+  const list = models.value || []
+  if (!list.length) {
+    activeModelKey.value = ''
     return
   }
-  activeProviderConfig.value = JSON.parse(localStorage.getItem(`provider_${id}_config`) || '{}')
+
+  if (!activeModelKey.value) {
+    activeModelKey.value = list.find(x => x && x.enabled)?.id || list[0]?.id || ''
+  }
+
+  let hasActive = false
+  list.forEach(x => {
+    const isActive = x && x.id === activeModelKey.value
+    if (isActive) hasActive = true
+    if (x) x.enabled = isActive
+  })
+
+  if (!hasActive) {
+    activeModelKey.value = list[0]?.id || ''
+    list.forEach(x => {
+      if (x) x.enabled = x.id === activeModelKey.value
+    })
+  }
 }
-watch(activeProviderId, loadActiveConfig, { immediate: true })
-watch(showEditModal, (v) => {
-  if (!v) loadActiveConfig()
+
+const saveAiConfigToServer = async (opts = {}) => {
+  const headers = authHeaders()
+  if (!headers) return
+  const silent = !!opts.silent
+  const toast = !!opts.toast
+  if (!silent) aiSaving.value = true
+  try {
+    const payload = {
+      active_model_key: activeModelKey.value || '',
+      models: (models.value || []).map((m, idx) => ({
+        model_key: m.id,
+        model_name: m.name || '',
+        real_model_id: m.tag || '',
+        enabled: !!m.enabled,
+        api_key: m.apiKey || '',
+        api_endpoint: m.endpoint || '',
+        sort_order: Number.isFinite(m.sortOrder) ? m.sortOrder : idx
+      }))
+    }
+
+    for (const base of apiBaseCandidates.value) {
+      const res = await fetch(`${base}/api/ai/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify(payload)
+      })
+      if (res.status === 401) {
+        if (toast) showToast('登录已失效，请重新登录', 'error')
+        break
+      }
+      if (res.ok) {
+        if (apiBaseUrl.value !== base) {
+          apiBase.value = base
+          localStorage.setItem('apiBase', base)
+        }
+        if (toast) showToast('已保存到数据库', 'success')
+        serverSnapshot.value = JSON.parse(JSON.stringify({ activeModelKey: activeModelKey.value || '', models: models.value || [] }))
+        break
+      }
+    }
+  } catch (e) {
+  } finally {
+    if (!silent) aiSaving.value = false
+  }
+}
+
+const scheduleActiveSave = () => {
+  if (suppressSync.value) return
+  if (activeSyncTimer) clearTimeout(activeSyncTimer)
+  activeSyncTimer = setTimeout(() => {
+    saveAiConfigToServer({ silent: true })
+  }, 300)
+}
+
+watch(models, () => {
+  normalizeActiveModel()
+  persistModelsConfig()
+}, { deep: true })
+
+watch(activeModelKey, () => {
+  normalizeActiveModel()
+  persistModelsConfig()
 })
 
-const defaultModelId = computed({
-  get: () => activeProviderConfig.value.defaultModelId || '',
-  set: (v) => {
-    const id = activeProviderId.value
-    if (!id) return
-    activeProviderConfig.value = { ...activeProviderConfig.value, defaultModelId: v || '' }
-    localStorage.setItem(`provider_${id}_config`, JSON.stringify(activeProviderConfig.value))
+const openEditor = (m) => {
+  editDraft.value = {
+    id: m.id,
+    name: m.name || '',
+    tag: m.tag || '',
+    apiKey: m.apiKey || '',
+    endpoint: m.endpoint || ''
   }
+  apiKeyFocused.value = false
+  openModelId.value = m.id
+}
+
+const toggleModel = (m) => {
+  if (openModelId.value === m.id) {
+    openModelId.value = ''
+    editDraft.value = null
+    apiKeyFocused.value = false
+    return
+  }
+  openEditor(m)
+}
+
+const saveEditor = async () => {
+  if (!editDraft.value) return
+  const d = editDraft.value
+  const target = (models.value || []).find(x => x.id === d.id)
+  if (target) {
+    target.name = d.name || ''
+    target.tag = d.tag || ''
+    target.apiKey = d.apiKey || ''
+    target.endpoint = d.endpoint || ''
+  }
+  editDraft.value = null
+  apiKeyFocused.value = false
+  openModelId.value = ''
+  await saveAiConfigToServer({ toast: true })
+}
+
+const cancelEditor = () => {
+  editDraft.value = null
+  apiKeyFocused.value = false
+  openModelId.value = ''
+}
+
+const revertAiConfig = () => {
+  if (!serverSnapshot.value) return
+  suppressSync.value = true
+  try {
+    const snap = JSON.parse(JSON.stringify(serverSnapshot.value))
+    models.value = Array.isArray(snap.models) ? snap.models : []
+    activeModelKey.value = snap.activeModelKey || ''
+    normalizeActiveModel()
+    persistModelsConfig()
+  } finally {
+    suppressSync.value = false
+  }
+  editDraft.value = null
+  apiKeyFocused.value = false
+  openModelId.value = ''
+}
+const removeModel = async (m) => {
+  models.value = models.value.filter(x => x.id !== m.id)
+  if (activeModelKey.value === m.id) normalizeActiveModel()
+  await saveAiConfigToServer({ silent: true })
+}
+const addModel = () => {
+  const id = `custom-${Date.now()}`
+  const nextSort = (models.value || []).length
+  models.value = [...models.value, { id, name: '', tag: '', enabled: false, apiKey: '', endpoint: '', sortOrder: nextSort }]
+  openEditor(models.value[models.value.length - 1])
+}
+
+const loadFromServer = async () => {
+  const headers = authHeaders()
+  if (!headers) return
+  try {
+    let data = null
+    for (const base of apiBaseCandidates.value) {
+      const res = await fetch(`${base}/api/ai/config`, {
+        method: 'GET',
+        headers: { ...headers }
+      })
+      if (res.status === 401) {
+        error.value = '登录已失效，请重新登录'
+        return
+      }
+      if (!res.ok) continue
+      data = await res.json()
+      if (apiBaseUrl.value !== base) {
+        apiBase.value = base
+        localStorage.setItem('apiBase', base)
+      }
+      break
+    }
+    if (!data) return
+    const incoming = Array.isArray(data.models) ? data.models : []
+    suppressSync.value = true
+    models.value = incoming.map((m, idx) => ({
+      id: m.model_key,
+      name: m.model_name || '',
+      tag: m.real_model_id || '',
+      enabled: !!m.enabled,
+      apiKey: m.api_key || '',
+      endpoint: m.api_endpoint || '',
+      sortOrder: Number.isFinite(m.sort_order) ? m.sort_order : idx
+    }))
+    activeModelKey.value = data.active_model_key || ''
+    normalizeActiveModel()
+    persistModelsConfig()
+    serverSnapshot.value = JSON.parse(JSON.stringify({ activeModelKey: activeModelKey.value || '', models: models.value || [] }))
+  } finally {
+    suppressSync.value = false
+  }
+}
+
+onMounted(() => {
+  loadFromServer()
 })
-const modelOptions = computed(() => Array.isArray(activeProviderConfig.value.models) ? activeProviderConfig.value.models : [])
 </script>
 
 <template>
   <div class="page-full">
+    <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
     <div class="page-full-title">配置管理</div>
     <div class="page-full-body">
       <!-- 基础设置 -->
@@ -97,47 +383,74 @@ const modelOptions = computed(() => Array.isArray(activeProviderConfig.value.mod
         
         <div class="ai-card">
           <div class="card-header card-header-row">
-            <span>模型供应商</span>
-            <div class="default-model">
-              <span class="default-label">默认模型</span>
-              <select class="default-select" v-model="defaultModelId">
+            <span>模型列表</span>
+            <div class="default-model" v-if="models.length">
+              <span class="default-label">启用模型</span>
+              <select class="default-select" v-model="activeModelKey" @change="scheduleActiveSave">
                 <option value="">暂未选择</option>
-                <option v-for="m in modelOptions" :key="m.id" :value="m.id">{{ m.name || m.tag || m.id }}</option>
+                <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name || m.tag || m.id }}</option>
               </select>
             </div>
           </div>
-          <div class="provider-list">
-            <div v-for="p in providers" :key="p.id" class="provider-item">
-              <div class="provider-info">
-                <img :src="p.icon" class="provider-icon" alt="" />
-                <span class="provider-name">{{ p.name }}</span>
+          <div class="model-list">
+            <div v-for="m in models" :key="m.id" class="model-row">
+              <div class="model-item">
+                <div class="model-left">
+                  <label class="switch sm">
+                    <input type="checkbox" :checked="activeModelKey === m.id" @change="() => { activeModelKey = m.id; scheduleActiveSave() }">
+                    <span class="slider round"></span>
+                  </label>
+                  <span class="model-name">{{ m.name || '未命名模型' }}</span>
+                  <span v-if="m.tag" class="model-tag">{{ m.tag }}</span>
+                </div>
+                <div class="model-right">
+                  <button class="icon-btn" @click.stop="removeModel(m)" type="button" aria-label="删除模型">×</button>
+                  <span class="chevron" :class="{ open: openModelId === m.id }" @click.stop="toggleModel(m)">›</span>
+                </div>
               </div>
-              <div class="provider-actions">
-                <label class="switch">
-                  <input type="checkbox" v-model="p.enabled">
-                  <span class="slider round"></span>
-                </label>
-                <button class="action-btn" @click="openEditModal(p)">
-                  <span class="edit-icon">✎</span> 编辑
-                </button>
+              <div v-if="openModelId === m.id" class="model-expand">
+                <div class="form-item">
+                  <label class="label">模型名称</label>
+                  <input class="input" v-model="editDraft.name" placeholder="输入模型名称" />
+                </div>
+                <div class="form-item">
+                  <label class="label">模型 ID</label>
+                  <input class="input" v-model="editDraft.tag" placeholder="输入模型 ID" />
+                </div>
+                <div class="form-item">
+                  <div class="label-row">
+                    <label class="label">API Key</label>
+                    <a class="label-link" href="https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
+                  </div>
+                  <input
+                    class="input"
+                    autocomplete="new-password"
+                    :value="apiKeyFocused ? editDraft.apiKey : maskApiKey(editDraft.apiKey)"
+                    @focus="apiKeyFocused = true"
+                    @blur="apiKeyFocused = false"
+                    @input="(e) => (editDraft.apiKey = e.target.value)"
+                    placeholder="请输入 API Key"
+                  />
+                </div>
+                <div class="form-item">
+                  <label class="label">API 前置 URL</label>
+                  <input class="input" v-model="editDraft.endpoint" placeholder="请输入 API 前置 URL" />
+                </div>
+
+                <div class="edit-actions">
+                  <button class="btn primary" type="button" :disabled="aiSaving" @click="saveEditor">{{ aiSaving ? '保存中' : '保存' }}</button>
+                  <button class="btn" type="button" :disabled="aiSaving" @click="cancelEditor">取消</button>
+                  <button class="btn" type="button" :disabled="aiSaving || !serverSnapshot" @click="revertAiConfig">撤销全部修改</button>
+                </div>
               </div>
             </div>
-            
-            <div class="add-provider">
-              <span class="plus">+</span> 添加供应商
-            </div>
+
+            <button class="add-model-btn" type="button" @click="addModel">
+              <span class="plus">+</span> 添加模型
+            </button>
           </div>
         </div>
       </div>
-
-      <!-- 供应商编辑弹窗 -->
-      <ProviderEditModal 
-        v-if="showEditModal"
-        :show="showEditModal" 
-        :provider="currentProvider || {}"
-        @close="showEditModal = false"
-        @save="handleProviderSave"
-      />
     </div>
   </div>
 </template>
@@ -179,11 +492,32 @@ const modelOptions = computed(() => Array.isArray(activeProviderConfig.value.mod
 .form-item {
   margin-bottom: 16px;
 }
+.label-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.label-row .label {
+  margin-bottom: 0;
+}
 .label {
   display: block;
   color: #64748b;
   font-size: 14px;
   margin-bottom: 8px;
+}
+.label-link {
+  display: inline-flex;
+  align-items: center;
+  font-size: 14px;
+  color: #8b5cf6;
+  font-weight: 500;
+  text-decoration: none;
+}
+.label-link:hover {
+  text-decoration: underline;
 }
 .input {
   width: 520px;
@@ -291,41 +625,146 @@ const modelOptions = computed(() => Array.isArray(activeProviderConfig.value.mod
   gap: 16px;
 }
 
-.action-btn {
+.model-list {
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.model-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.model-item {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border: 1px solid #e2e8f0;
+  padding: 10px 16px;
   background: #fff;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #475569;
-  cursor: pointer;
+  border: 1px solid #f1f5f9;
+  border-radius: 16px;
   transition: all 0.2s;
 }
-.action-btn:hover {
-  border-color: #cbd5e1;
-  background: #f8fafc;
+.model-item:hover {
+  border-color: #e2e8f0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
-
-.add-provider {
+.model-left {
   display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.model-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #334155;
+  white-space: nowrap;
+}
+.model-tag {
+  font-size: 12px;
+  color: #82b6e9;
+  background: #f8fafc;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+.model-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 12px;
-  border: 1px dashed #e2e8f0;
-  border-radius: 10px;
-  color: #8b5cf6;
-  font-size: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 8px;
+  color: #94a3b8;
   cursor: pointer;
-  transition: all 0.2s;
-  margin-top: 4px;
+  font-size: 18px;
+  line-height: 1;
 }
-.add-provider:hover {
-  background: #f5f3ff;
-  border-color: #ddd6fe;
+.icon-btn:hover {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+.chevron {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 18px;
+  color: #94a3b8;
+  font-weight: 300;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.2s, background 0.2s, color 0.2s;
+}
+.chevron:hover {
+  background: #f8fafc;
+  color: #64748b;
+}
+.chevron.open {
+  transform: rotate(90deg);
+}
+.model-expand {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 18px 16px 2px;
+}
+.edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 16px;
+}
+.ok.inline {
+  margin-left: 4px;
+  padding: 0;
+  background: transparent;
+}
+.add-model-btn {
+  display: flex;
+  width: fit-content;
+  padding: 6px 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #475569;
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.2s;
+}
+.add-model-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+.switch.sm {
+  width: 36px;
+  height: 18px;
+}
+.switch.sm .slider:before {
+  height: 12px;
+  width: 12px;
+  left: 3px;
+  bottom: 3px;
+}
+.switch.sm input:checked + .slider:before {
+  transform: translateX(18px);
 }
 
 /* Switch Component */

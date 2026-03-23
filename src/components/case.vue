@@ -65,10 +65,13 @@ const genFromApiDoc = async () => {
     fd.append('output_name', outputName.value || 'autointerface_test_cases')
     if (apiFile.value) fd.append('file', apiFile.value)
     if (apiUrl.value) fd.append('doc_url', apiUrl.value)
+    const token = localStorage.getItem('token') || ''
     const res = await fetch(`${apiBase.value}/api/cases/generate-from-doc`, {
       method: 'POST',
+      headers: token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {},
       body: fd
     })
+    if (res.status === 401) throw new Error('请先登录')
     if (!res.ok) throw new Error('生成失败')
     const data = await res.json()
     const path = data.file_path || data.file_name || ''
@@ -84,7 +87,7 @@ const genFromApiDoc = async () => {
     toastMsg.value = '生成成功'
     toastShow.value = true
   } catch (e) {
-    genError.value = '生成失败'
+    genError.value = e && e.message ? e.message : '生成失败'
   } finally {
     generating.value = false
   }

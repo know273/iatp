@@ -17,6 +17,7 @@ const filesOpen = ref(true)
 const tplOpen = ref(true)
 const generating = ref(false)
 const genError = ref('')
+const aiReply = ref('')
 const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
 
 const onPickFile = (e) => {
@@ -66,30 +67,51 @@ const genFromApiDoc = async () => {
     if (apiFile.value) fd.append('file', apiFile.value)
     if (apiUrl.value) fd.append('doc_url', apiUrl.value)
     const token = localStorage.getItem('token') || ''
+    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
     const res = await fetch(`${apiBase.value}/api/cases/generate-from-doc`, {
       method: 'POST',
-      headers: token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {},
+      headers,
       body: fd
     })
-    if (res.status === 401) throw new Error('请先登录')
-    if (!res.ok) throw new Error('生成失败')
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || '生成失败')
+    }
     const data = await res.json()
     const path = data.file_path || data.file_name || ''
-    const item = {
-      name: baseName(path || outputName.value + '.csv'),
-      url: path ? toAbsUrl(apiBase.value, path) : '',
-      type: 'CSV',
-      size: data.size || '未知',
-      time: data.time || new Date().toISOString().replace('T',' ').slice(0,19)
+    if (path) {
+      const item = {
+        name: baseName(path || outputName.value + '.csv'),
+        url: path ? toAbsUrl(apiBase.value, path) : '',
+        type: 'CSV',
+        size: data.size || '未知',
+        time: data.time || new Date().toISOString().replace('T',' ').slice(0,19)
+      }
+      uploadedFiles.value.unshift(item)
     }
-    uploadedFiles.value.unshift(item)
     toastType.value = 'success'
     toastMsg.value = '生成成功'
     toastShow.value = true
+    aiReply.value = data.ai_reply ? String(data.ai_reply) : ''
   } catch (e) {
     genError.value = e && e.message ? e.message : '生成失败'
   } finally {
     generating.value = false
+  }
+}
+
+const copyAiReply = async () => {
+  const text = aiReply.value || ''
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    toastType.value = 'success'
+    toastMsg.value = '已复制'
+    toastShow.value = true
+  } catch (_) {
+    toastType.value = 'error'
+    toastMsg.value = '复制失败'
+    toastShow.value = true
   }
 }
 const toggleGen = () => {
@@ -230,7 +252,9 @@ const addCol = () => {
   columns.value.push({ name: '新列', required: false, desc: '新列描述', example: '' })
 }
 const downloadCsvTpl = () => {
-  alert('下载CSV模板')
+  toastType.value = 'info'
+  toastMsg.value = '模板下载功能待接入'
+  toastShow.value = true
 }
 </script>
 
@@ -285,6 +309,13 @@ const downloadCsvTpl = () => {
           <span class="gen-text">生成中</span>
         </div>
         <div class="gen-error" v-if="genError">{{ genError }}</div>
+        <div class="ai-reply" v-if="aiReply">
+          <div class="ai-reply-head">
+            <span class="ai-reply-title">模型回复</span>
+            <button class="btn sm" type="button" @click="copyAiReply">复制</button>
+          </div>
+          <pre class="ai-reply-body">{{ aiReply }}</pre>
+        </div>
       </div>
     </section>
 
@@ -570,6 +601,34 @@ const downloadCsvTpl = () => {
   color: #ff4d4f;
   font-size: 14px;
   margin-top: 8px;
+}
+.ai-reply {
+  margin-top: 12px;
+  border: 1px solid #eef2f7;
+  border-radius: 12px;
+  background: #fff;
+}
+.ai-reply-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef2f7;
+}
+.ai-reply-title {
+  font-weight: 600;
+  color: #1e293b;
+}
+.ai-reply-body {
+  margin: 0;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #0f172a;
+  max-height: 360px;
+  overflow: auto;
 }
 @keyframes spin {
   from { transform: rotate(0deg); }

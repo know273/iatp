@@ -2,28 +2,45 @@
 import { ref } from 'vue'
 
 import { useRouter } from 'vue-router'
+import Toast from './ui/Toast.vue'
 
 const router = useRouter()
 
 const username = ref('')
 const password = ref('')
 const isPwdVisible = ref(false)
+const loginErrors = ref({ username: '', password: '' })
+const toastShow = ref(false)
+const toastMsg = ref('')
+const toastType = ref('success')
+
+const showToast = (msg, type = 'info') => {
+  toastMsg.value = msg || ''
+  toastType.value = type
+  toastShow.value = true
+}
 
 const regUsername = ref('')
 const regPassword = ref('')
 const regPassword2 = ref('')
 const isRegPwdVisible = ref(false)
 const isRegPwd2Visible = ref(false)
+const regErrors = ref({ username: '', password: '', password2: '' })
 
 const base = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000'
 const activeCard = ref('login')
 
 const handleLogin = async () => {
+  loginErrors.value = { username: '', password: '' }
+  if (!username.value.trim()) loginErrors.value.username = '用户名必填'
+  if (!password.value) loginErrors.value.password = '访问密码必填'
+  if (loginErrors.value.username || loginErrors.value.password) return
+
   if (username.value === '6' && password.value === '6') {
     localStorage.setItem('token', 'superuser-local')
     localStorage.setItem('username', username.value)
-    alert("欢迎超级用户")
-    router.push('/main')
+    showToast('欢迎超级用户', 'success')
+    setTimeout(() => router.push('/main'), 250)
     return
   }
 
@@ -35,33 +52,36 @@ const handleLogin = async () => {
     })
     if (!res.ok) {
       const text = await res.text()
-      alert(text || '登录失败')
+      showToast(text || '登录失败', 'error')
       return
     }
     const data = await res.json()
     if (data && data.token) {
       localStorage.setItem('token', data.token)
       localStorage.setItem('username', username.value)
-      router.push('/main')
+      showToast('登录成功', 'success')
+      setTimeout(() => router.push('/main'), 250)
     } else {
-      alert('登录响应异常')
+      showToast('登录响应异常', 'error')
     }
   } catch (e) {
-    alert('无法连接服务器')
+    showToast('无法连接服务器', 'error')
   }
 }
 
 const handleRegister = async () => {
+  regErrors.value = { username: '', password: '', password2: '' }
   const u = regUsername.value.trim()
   const p1 = regPassword.value
   const p2 = regPassword2.value
 
-  if (!u || !p1 || !p2) {
-    alert('请填写完整信息')
-    return
-  }
+  if (!u) regErrors.value.username = '用户名必填'
+  if (!p1) regErrors.value.password = '访问密码必填'
+  if (!p2) regErrors.value.password2 = '请再次输入密码'
+  if (regErrors.value.username || regErrors.value.password || regErrors.value.password2) return
+
   if (p1 !== p2) {
-    alert('两次输入的密码不一致')
+    regErrors.value.password2 = '两次输入的密码不一致'
     return
   }
 
@@ -74,11 +94,11 @@ const handleRegister = async () => {
 
     if (!res.ok) {
       const text = await res.text()
-      alert(text || '注册失败')
+      showToast(text || '注册失败', 'error')
       return
     }
 
-    alert('注册成功，请登录')
+    showToast('注册成功，请登录', 'success')
     username.value = u
     password.value = ''
     regUsername.value = ''
@@ -86,13 +106,14 @@ const handleRegister = async () => {
     regPassword2.value = ''
     activeCard.value = 'login'
   } catch (e) {
-    alert('无法连接服务器')
+    showToast('无法连接服务器', 'error')
   }
 }
 </script>
 
 <template>
   <div class="auth-page">
+    <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
     <div class="auth-layout" :data-active="activeCard">
       <div class="auth-card login-card">
         <div class="card-header">
@@ -106,8 +127,11 @@ const handleRegister = async () => {
             type="text"
             v-model="username"
             class="form-input"
+            :class="{ 'is-error': !!loginErrors.username }"
             placeholder="请输入用户名"
+            @input="loginErrors.username = ''"
           />
+          <div v-if="loginErrors.username" class="field-error">{{ loginErrors.username }}</div>
         </div>
 
         <div class="form-item">
@@ -117,7 +141,9 @@ const handleRegister = async () => {
               :type="isPwdVisible ? 'text' : 'password'"
               v-model="password"
               class="form-input pwd-input"
+              :class="{ 'is-error': !!loginErrors.password }"
               placeholder="请输入密码"
+              @input="loginErrors.password = ''"
             />
             <span
               class="pwd-eye"
@@ -127,15 +153,16 @@ const handleRegister = async () => {
               <i :class="isPwdVisible ? 'icon-eye-open' : 'icon-eye-close'"></i>
             </span>
           </div>
+          <div v-if="loginErrors.password" class="field-error">{{ loginErrors.password }}</div>
         </div>
 
-        <button class="primary-btn" @click="handleLogin">登录</button>
+        <button type="button" class="primary-btn" @click="handleLogin">登录</button>
 
         <div class="hint-row">
           <span class="hint-text">测试账号：6 / 6 可直通</span>
         </div>
 
-        <div class="switch-row">.
+        <div class="switch-row">
           <span class="switch-text">还没有账号？</span>
           <button type="button" class="switch-action" @click="activeCard = 'register'">立即注册</button>
         </div>
@@ -153,8 +180,11 @@ const handleRegister = async () => {
             type="text"
             v-model="regUsername"
             class="form-input"
+            :class="{ 'is-error': !!regErrors.username }"
             placeholder="请输入用户名"
+            @input="regErrors.username = ''"
           />
+          <div v-if="regErrors.username" class="field-error">{{ regErrors.username }}</div>
         </div>
 
         <div class="form-item">
@@ -164,7 +194,9 @@ const handleRegister = async () => {
               :type="isRegPwdVisible ? 'text' : 'password'"
               v-model="regPassword"
               class="form-input pwd-input"
+              :class="{ 'is-error': !!regErrors.password }"
               placeholder="请输入密码"
+              @input="regErrors.password = ''"
             />
             <span
               class="pwd-eye"
@@ -174,6 +206,7 @@ const handleRegister = async () => {
               <i :class="isRegPwdVisible ? 'icon-eye-open' : 'icon-eye-close'"></i>
             </span>
           </div>
+          <div v-if="regErrors.password" class="field-error">{{ regErrors.password }}</div>
         </div>
 
         <div class="form-item">
@@ -183,7 +216,9 @@ const handleRegister = async () => {
               :type="isRegPwd2Visible ? 'text' : 'password'"
               v-model="regPassword2"
               class="form-input pwd-input"
+              :class="{ 'is-error': !!regErrors.password2 }"
               placeholder="请再次输入密码"
+              @input="regErrors.password2 = ''"
             />
             <span
               class="pwd-eye"
@@ -193,9 +228,10 @@ const handleRegister = async () => {
               <i :class="isRegPwd2Visible ? 'icon-eye-open' : 'icon-eye-close'"></i>
             </span>
           </div>
+          <div v-if="regErrors.password2" class="field-error">{{ regErrors.password2 }}</div>
         </div>
 
-        <button class="secondary-btn" @click="handleRegister">注册</button>
+        <button type="button" class="secondary-btn" @click="handleRegister">注册</button>
 
         <div class="switch-row">
           <span class="switch-text">已有账号？</span>
@@ -314,6 +350,20 @@ const handleRegister = async () => {
   outline: none;
   border-color: rgba(30, 80, 200, 0.6);
   box-shadow: 0 0 0 4px rgba(30, 80, 200, 0.12);
+}
+.form-input.is-error {
+  border-color: #ff4d4f;
+  background: #fff1f0;
+  box-shadow: none;
+}
+.form-input.is-error:focus {
+  border-color: #ff4d4f;
+  box-shadow: 0 0 0 4px rgba(255, 77, 79, 0.12);
+}
+.field-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #ff4d4f;
 }
 
 .pwd-input-wrapper {

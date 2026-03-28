@@ -33,12 +33,13 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 
 const activeMenu = ref('/main/home')
 const currentUser = ref(localStorage.getItem('username') || '')
 const router = useRouter()
+const route = useRoute()
 const handleLogout = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
@@ -53,6 +54,15 @@ const menuItems = [
   { name: '测试报告', path: '/main/report' },
   { name: '平台操作指南', path: '/main/guide' }
 ]
+
+watch(
+  () => route.path,
+  (p) => {
+    const hit = menuItems.find(x => x.path === p)
+    activeMenu.value = hit ? hit.path : p
+  },
+  { immediate: true }
+)
 
 </script>
 

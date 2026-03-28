@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import Toast from './ui/Toast.vue'
+import questionIcon from '../assets/question-svgrepo-com.svg'
 
 const inferApiBase = () => {
   const saved = localStorage.getItem('apiBase')
@@ -14,6 +15,7 @@ const inferApiBase = () => {
 }
 
 const apiBase = ref(inferApiBase())
+const baseUrl = ref(localStorage.getItem('baseUrl') || '')
 const saving = ref(false)
 const saved = ref(false)
 const error = ref('')
@@ -24,6 +26,7 @@ const save = async () => {
   saving.value = true
   try {
     localStorage.setItem('apiBase', apiBase.value || '')
+    localStorage.setItem('baseUrl', baseUrl.value || '')
     saved.value = true
   } finally {
     saving.value = false
@@ -369,6 +372,13 @@ onMounted(() => {
           <input class="input" v-model="apiBase" placeholder="例如: http://127.0.0.1:5000" />
           <div class="tips">优先使用此处设置，其次使用环境变量VITE_API_BASE</div>
         </div>
+        <div class="form-item">
+          <div class="label-row">
+            <label class="label">base_url</label>
+            <img class="help-icon" :src="questionIcon" alt="帮助" title="生成用例时会拼接为完整请求URL：base_url + 请求URL" />
+          </div>
+          <input class="input" v-model="baseUrl" placeholder="例如: http://127.0.0.1:5000" />
+        </div>
         <div class="btns">
           <button class="btn primary" :disabled="saving" @click="save">{{ saving ? '保存中' : '保存' }}</button>
           <button class="btn" @click="openBase">打开</button>
@@ -518,6 +528,15 @@ onMounted(() => {
 }
 .label-link:hover {
   text-decoration: underline;
+}
+.help-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.75;
+  cursor: help;
+}
+.help-icon:hover {
+  opacity: 1;
 }
 .input {
   width: 520px;

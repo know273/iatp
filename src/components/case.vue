@@ -171,10 +171,33 @@ watch(uploadedFiles, () => {
   if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
 })
 const downloadFile = (f) => {
-  if (f && f.url) window.open(f.url, '_blank')
+  if (!f) return
+  const name = f.name || ''
+  if (!name) return
+  const url = `${apiBase.value.replace(/\/$/, '')}/api/cases/download?file_name=${encodeURIComponent(name)}`
+  window.open(url, '_blank')
 }
 const deleteFile = (f) => {
-  uploadedFiles.value = uploadedFiles.value.filter(x => x !== f)
+  if (!f) return
+  const name = f.name || ''
+  if (!name) return
+  fetch(`${apiBase.value}/api/cases/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_name: name })
+  })
+    .then(async (res) => {
+      if (!res.ok) throw new Error(await res.text())
+      uploadedFiles.value = uploadedFiles.value.filter(x => x !== f)
+      toastType.value = 'success'
+      toastMsg.value = '删除成功'
+      toastShow.value = true
+    })
+    .catch(() => {
+      toastType.value = 'error'
+      toastMsg.value = '删除失败'
+      toastShow.value = true
+    })
 }
 const toastShow = ref(false)
 const toastMsg = ref('')

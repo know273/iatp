@@ -16,7 +16,7 @@
         >
           <h3 class="card-title">{{ card.title }}</h3>
           <p class="card-desc">{{ card.desc }}</p>
-          <button class="card-btn">{{ card.btnText }}</button>
+          <button class="card-btn" type="button" @click="router.push(card.path)">{{ card.btnText }}</button>
         </div>
       </div>
     </section>
@@ -46,7 +46,7 @@
       <div class="guide-card">
         <h3 class="guide-title">平台操作指南</h3>
         <p class="guide-desc">查看详细的使用指南，了解如何配置和测试接口</p>
-        <button class="guide-btn">查看操作指南</button>
+        <button class="guide-btn" type="button" @click="router.push('/main/guide')">查看操作指南</button>
       </div>
 
       <!-- 页脚 -->
@@ -58,26 +58,34 @@
 </template>
 
 <script setup>
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+
 const functionCards = [
   {
     title: '配置管理',
     desc: '支持全局配置、多环境配置，灵活管理测试参数',
-    btnText: '进入配置'
+    btnText: '进入配置',
+    path: '/main/config'
   },
   {
     title: '用例管理',
     desc: '支持API文档、Excel/CSV，可视化管理',
-    btnText: '进入管理'
+    btnText: '进入管理',
+    path: '/main/case'
   },
   {
     title: '执行测试',
     desc: '高性能并发执行，实时监控测试进度',
-    btnText: '开始执行'
+    btnText: '开始执行',
+    path: '/main/execute'
   },
   {
     title: '测试报告',
     desc: '可视化HTML报告，详细的测试结果分析',
-    btnText: '查看报告'
+    btnText: '查看报告',
+    path: '/main/report'
   }
 ]
 </script>

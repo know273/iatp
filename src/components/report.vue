@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import Toast from './ui/Toast.vue'
+import Pagination from './ui/Pagination.vue'
 
 const route = useRoute()
 const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
@@ -9,6 +11,16 @@ const toAbsUrl = (base, rel) => {
   return String(base).replace(/\/$/, '') + '/' + p
 }
 const reports = ref([])
+const currentPage = ref(1)
+const pageSize = 10
+const totalItems = computed(() => reports.value.length)
+const pagedReports = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return reports.value.slice(start, start + pageSize)
+})
+const toastShow = ref(false)
+const toastMsg = ref('')
+const toastType = ref('success')
 
 const ensureQueryReport = () => {
   const name = route.query?.name
@@ -24,8 +36,19 @@ const ensureQueryReport = () => {
 }
 ensureQueryReport()
 
-const openReport = (item) => {
-  const url = toAbsUrl(apiBase.value, `/reports/${item.reportName}`)
+const openReport = async (item) => {
+  try {
+    const res = await fetch(`${apiBase.value}/api/reports/report/exists?report_name=${encodeURIComponent(item.reportName)}`)
+    const data = await res.json()
+    if (!data.exists) {
+      toastType.value = 'error'
+      toastMsg.value = '已删除'
+      toastShow.value = true
+      return
+    }
+  } catch (_) {
+  }
+  const url = toAbsUrl(apiBase.value, `/reports/report/${item.reportName}`)
   window.open(url, '_blank')
 }
 
@@ -47,22 +70,6 @@ const downloadJSON = (item) => {
     size: item.size,
     createdAt: item.createdAt
   }
-  // 已在外层声明 blob，此处无需重复声明
-
-const loadReports = async () => {
-  try {
-    const res = await fetch(`${apiBase.value}/api/reports/files`)
-    if (!res.ok) return
-    const data = await res.json()
-    const arr = Array.isArray(data.reports) ? data.reports : []
-    reports.value = arr.map(x => ({
-      reportName: x.report_name,
-      size: x.size,
-      createdAt: x.createdAt
-    }))
-  } catch (_) {}
-}
-onMounted(loadReports)
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
@@ -71,13 +78,49 @@ onMounted(loadReports)
   URL.revokeObjectURL(a.href)
 }
 
-const removeReport = (idx) => {
-  reports.value.splice(idx, 1)
+const loadReports = async () => {
+  try {
+    const res = await fetch(`${apiBase.value}/api/reports/report/files`)
+    if (!res.ok) return
+    const data = await res.json()
+    const arr = Array.isArray(data.reports) ? data.reports : []
+    reports.value = arr.map(x => ({
+      reportName: x.report_name,
+      size: x.size,
+      createdAt: x.createdAt
+    }))
+    currentPage.value = 1
+  } catch (_) {}
+}
+onMounted(loadReports)
+
+const removeReport = async (idx) => {
+  const item = pagedReports.value[idx]
+  if (!item) return
+  try {
+    const res = await fetch(`${apiBase.value}/api/reports/report/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report_name: item.reportName })
+    })
+    if (!res.ok) throw new Error('delete failed')
+    const realIndex = reports.value.findIndex(x => x.reportName === item.reportName)
+    if (realIndex >= 0) reports.value.splice(realIndex, 1)
+    if (currentPage.value > Math.max(1, Math.ceil(reports.value.length / pageSize))) currentPage.value = Math.max(1, Math.ceil(reports.value.length / pageSize))
+    toastType.value = 'success'
+    toastMsg.value = '删除成功'
+    toastShow.value = true
+  } catch (_) {
+    toastType.value = 'error'
+    toastMsg.value = '删除失败'
+    toastShow.value = true
+  }
 }
 </script>
 
 <template>
   <div class="page-full">
+    <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
     <div class="page-full-title">测试报告</div>
     <div class="page-subtitle">查看和管理测试报告</div>
     <section class="card">
@@ -94,7 +137,7 @@ const removeReport = (idx) => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(item, idx) in reports" :key="item.reportName">
+              <tr v-for="(item, idx) in pagedReports" :key="item.reportName">
                 <td>{{ item.reportName }}</td>
                 <td>{{ item.size }}</td>
                 <td>{{ item.createdAt }}</td>
@@ -111,6 +154,7 @@ const removeReport = (idx) => {
             </tbody>
           </table>
         </div>
+        <Pagination v-model="currentPage" :total="totalItems" :page-size="pageSize" />
       </div>
     </section>
   </div>
@@ -119,7 +163,7 @@ const removeReport = (idx) => {
 <style scoped>
 .page-full {
   width: 100%;
-  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   background: #fff;

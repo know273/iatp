@@ -1,8 +1,11 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import Toast from './ui/Toast.vue'
+import Pagination from './ui/Pagination.vue'
 
 const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
+const baseUrl = computed(() => localStorage.getItem('baseUrl') || '')
 const toAbsUrl = (base, rel) => {
   const p = String(rel || '').replace(/^\\+|^\/+/, '').replace(/\\/g, '/')
   return `${String(base).replace(/\/$/, '')}/${p}`
@@ -14,6 +17,9 @@ const env = ref('test')
 const concurrency = ref(1)
 const running = ref(false)
 const success = ref(false)
+const toastShow = ref(false)
+const toastMsg = ref('')
+const toastType = ref('success')
 const history = ref([
   {
     executedAt: '2026-02-19 20:36:07',
@@ -27,6 +33,13 @@ const history = ref([
   }
 ])
 const router = useRouter()
+const currentPage = ref(1)
+const pageSize = 10
+const totalItems = computed(() => history.value.length)
+const pagedHistory = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return history.value.slice(start, start + pageSize)
+})
 
 const formatTime = (d) => {
   const pad = (n) => String(n).padStart(2, '0')
@@ -49,13 +62,15 @@ const baseName = (p) => {
 
 const startRun = async () => {
   if (!selectedFile.value) return
+  if (!baseUrl.value) return
   running.value = true
   success.value = false
   try {
     const body = {
       file_path: selectedFile.value,
       env: env.value,
-      concurrency: Number(concurrency.value) || 1
+      concurrency: Number(concurrency.value) || 1,
+      base_url: baseUrl.value
     }
     const res = await fetch(`${apiBase.value}/api/execute/run`, {
       method: 'POST',
@@ -85,8 +100,20 @@ const startRun = async () => {
 
 const clearHistory = () => {
   history.value = []
+  currentPage.value = 1
 }
-const viewReport = (item) => {
+const viewReport = async (item) => {
+  try {
+    const res = await fetch(`${apiBase.value}/api/reports/report/exists?report_name=${encodeURIComponent(item.reportName)}`)
+    const data = await res.json()
+    if (!data.exists) {
+      toastType.value = 'error'
+      toastMsg.value = '已删除'
+      toastShow.value = true
+      return
+    }
+  } catch (_) {
+  }
   router.push({ path: '/main/report', query: { name: item.reportName } })
 }
 
@@ -100,10 +127,54 @@ const loadFiles = async () => {
     selectedFile.value = files.value[0] || ''
   } catch (_) {}
 }
-loadFiles()
+const loadHistory = async () => {
+  try {
+    const res = await fetch(`${apiBase.value}/api/reports/history/files`)
+    if (!res.ok) return
+    const data = await res.json()
+    const arr = Array.isArray(data.reports) ? data.reports : []
+    history.value = arr.map(x => ({
+      executedAt: x.createdAt,
+      fileName: x.file_name || '',
+      reportName: x.report_name,
+      total: x.total || '',
+      passed: x.passed || '',
+      failed: x.failed || '',
+      passRate: x.pass_rate || '',
+      reportUrl: `/reports/report/${x.report_name}`
+    }))
+    currentPage.value = 1
+  } catch (_) {}
+}
+
+const deleteHistoryReport = async (item) => {
+  try {
+    const res = await fetch(`${apiBase.value}/api/reports/history/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report_name: item.reportName })
+    })
+    if (!res.ok) throw new Error('delete failed')
+    history.value = history.value.filter(x => x !== item)
+    if (currentPage.value > Math.max(1, Math.ceil(history.value.length / pageSize))) currentPage.value = Math.max(1, Math.ceil(history.value.length / pageSize))
+    toastType.value = 'success'
+    toastMsg.value = '删除成功'
+    toastShow.value = true
+  } catch (_) {
+    toastType.value = 'error'
+    toastMsg.value = '删除失败'
+    toastShow.value = true
+  }
+}
+
+onMounted(() => {
+  loadFiles()
+  loadHistory()
+})
 </script>
 
 <template>
+  <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
   <div class="exec-page">
     <div class="exec-header">执行测试</div>
     <section class="card">
@@ -123,6 +194,11 @@ loadFiles()
             <option value="dev">dev</option>
             <option value="prod">prod</option>
           </select>
+        </div>
+        <div class="form-item">
+          <label class="label">base_url（来自配置管理）</label>
+          <input class="input" :value="baseUrl" disabled />
+          <div class="tips">用于拼接完整接口：base_url + 请求URL</div>
         </div>
         <div class="form-item">
           <label class="label">并发数</label>
@@ -164,7 +240,7 @@ loadFiles()
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in history" :key="item.executedAt + item.reportName">
+              <tr v-for="item in pagedHistory" :key="item.executedAt + item.reportName">
                 <td>{{ item.executedAt }}</td>
                 <td>{{ item.fileName }}</td>
                 <td>{{ item.reportName }}</td>
@@ -174,6 +250,7 @@ loadFiles()
                 <td>{{ item.passRate }}</td>
                 <td class="operation">
                   <button class="btn primary" @click="viewReport(item)">查看报告</button>
+                  <button class="btn danger" @click="deleteHistoryReport(item)">删除</button>
                 </td>
               </tr>
               <tr v-if="!history.length">
@@ -182,6 +259,7 @@ loadFiles()
             </tbody>
           </table>
         </div>
+        <Pagination v-model="currentPage" :total="totalItems" :page-size="pageSize" />
       </div>
     </section>
   </div>
@@ -295,11 +373,13 @@ loadFiles()
   padding: 12px 16px;
   font-weight: 600;
   color: #555;
+  font-size: 13px;
   border-bottom: 1px solid #f0f0f0;
 }
 .history-table tbody td {
   padding: 12px 16px;
   color: #333;
+  font-size: 13px;
   border-bottom: 1px solid #f5f5f5;
 }
 .history-table tbody tr:last-child td {

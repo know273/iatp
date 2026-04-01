@@ -3,6 +3,9 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Toast from './ui/Toast.vue'
 import Pagination from './ui/Pagination.vue'
+import IconButton from './ui/IconButton.vue'
+import checkIcon from '../assets/check.svg'
+import deleteIcon from '../assets/delete.svg'
 
 const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
 const baseUrl = computed(() => localStorage.getItem('baseUrl') || '')
@@ -66,15 +69,17 @@ const startRun = async () => {
   running.value = true
   success.value = false
   try {
+    const token = localStorage.getItem('token') || ''
+    const auth = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
     const body = {
-      file_path: selectedFile.value,
+      file_name: selectedFile.value,
       env: env.value,
       concurrency: Number(concurrency.value) || 1,
       base_url: baseUrl.value
     }
     const res = await fetch(`${apiBase.value}/api/execute/run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify(body)
     })
     if (!res.ok) throw new Error('执行失败')
@@ -82,7 +87,7 @@ const startRun = async () => {
     const now = new Date()
     history.value.unshift({
       executedAt: formatTime(now),
-      fileName: baseName(selectedFile.value),
+      fileName: selectedFile.value,
       reportName: data.report_name,
       total: data.total,
       passed: data.passed,
@@ -104,7 +109,9 @@ const clearHistory = () => {
 }
 const viewReport = async (item) => {
   try {
-    const res = await fetch(`${apiBase.value}/api/reports/report/exists?report_name=${encodeURIComponent(item.reportName)}`)
+    const token = localStorage.getItem('token') || ''
+    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
+    const res = await fetch(`${apiBase.value}/api/reports/report/exists?report_name=${encodeURIComponent(item.reportName)}`, { headers })
     const data = await res.json()
     if (!data.exists) {
       toastType.value = 'error'
@@ -119,17 +126,21 @@ const viewReport = async (item) => {
 
 const loadFiles = async () => {
   try {
-    const res = await fetch(`${apiBase.value}/api/cases/files`)
+    const token = localStorage.getItem('token') || ''
+    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
+    const res = await fetch(`${apiBase.value}/api/cases/files`, { headers })
     if (!res.ok) return
     const data = await res.json()
     const arr = Array.isArray(data.files) ? data.files : []
-    files.value = arr.map(x => x.file_path || '').filter(Boolean)
+    files.value = arr.map(x => x.file_name || '').filter(Boolean)
     selectedFile.value = files.value[0] || ''
   } catch (_) {}
 }
 const loadHistory = async () => {
   try {
-    const res = await fetch(`${apiBase.value}/api/reports/history/files`)
+    const token = localStorage.getItem('token') || ''
+    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
+    const res = await fetch(`${apiBase.value}/api/reports/history/files`, { headers })
     if (!res.ok) return
     const data = await res.json()
     const arr = Array.isArray(data.reports) ? data.reports : []
@@ -141,7 +152,7 @@ const loadHistory = async () => {
       passed: x.passed || '',
       failed: x.failed || '',
       passRate: x.pass_rate || '',
-      reportUrl: `/reports/report/${x.report_name}`
+      reportUrl: ''
     }))
     currentPage.value = 1
   } catch (_) {}
@@ -149,9 +160,11 @@ const loadHistory = async () => {
 
 const deleteHistoryReport = async (item) => {
   try {
+    const token = localStorage.getItem('token') || ''
+    const auth = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
     const res = await fetch(`${apiBase.value}/api/reports/history/delete`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({ report_name: item.reportName })
     })
     if (!res.ok) throw new Error('delete failed')
@@ -249,8 +262,8 @@ onMounted(() => {
                 <td>{{ item.failed }}</td>
                 <td>{{ item.passRate }}</td>
                 <td class="operation">
-                  <button class="btn primary" @click="viewReport(item)">查看报告</button>
-                  <button class="btn danger" @click="deleteHistoryReport(item)">删除</button>
+                  <IconButton :src="checkIcon" title="查看报告" :size="18" :button-size="36" @click="viewReport(item)" />
+                  <IconButton :src="deleteIcon" title="删除" :size="18" :button-size="36" @click="deleteHistoryReport(item)" />
                 </td>
               </tr>
               <tr v-if="!history.length">
@@ -386,7 +399,10 @@ onMounted(() => {
   border-bottom: none;
 }
 .operation {
-  text-align: right;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
 }
 .empty {
   text-align: center;

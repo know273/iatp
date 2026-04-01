@@ -3,6 +3,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import Toast from './ui/Toast.vue'
 import Pagination from './ui/Pagination.vue'
+import IconButton from './ui/IconButton.vue'
+import checkIcon from '../assets/check.svg'
+import deleteIcon from '../assets/delete.svg'
+import downloadIcon from '../assets/download.svg'
 
 const route = useRoute()
 const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
@@ -38,7 +42,9 @@ ensureQueryReport()
 
 const openReport = async (item) => {
   try {
-    const res = await fetch(`${apiBase.value}/api/reports/report/exists?report_name=${encodeURIComponent(item.reportName)}`)
+    const token = localStorage.getItem('token') || ''
+    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
+    const res = await fetch(`${apiBase.value}/api/reports/report/exists?report_name=${encodeURIComponent(item.reportName)}`, { headers })
     const data = await res.json()
     if (!data.exists) {
       toastType.value = 'error'
@@ -48,7 +54,14 @@ const openReport = async (item) => {
     }
   } catch (_) {
   }
-  const url = toAbsUrl(apiBase.value, `/reports/report/${item.reportName}`)
+  const token = localStorage.getItem('token') || ''
+  if (!token || token.split('.').length !== 3) {
+    toastType.value = 'error'
+    toastMsg.value = '请先登录'
+    toastShow.value = true
+    return
+  }
+  const url = toAbsUrl(apiBase.value, `/api/reports/report/view?report_name=${encodeURIComponent(item.reportName)}&token=${encodeURIComponent(token)}`)
   window.open(url, '_blank')
 }
 
@@ -64,23 +77,11 @@ const downloadCSV = (item) => {
   URL.revokeObjectURL(a.href)
 }
 
-const downloadJSON = (item) => {
-  const data = {
-    reportName: item.reportName,
-    size: item.size,
-    createdAt: item.createdAt
-  }
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `${item.reportName.replace(/\.html$/,'')}.json`
-  a.click()
-  URL.revokeObjectURL(a.href)
-}
-
 const loadReports = async () => {
   try {
-    const res = await fetch(`${apiBase.value}/api/reports/report/files`)
+    const token = localStorage.getItem('token') || ''
+    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
+    const res = await fetch(`${apiBase.value}/api/reports/report/files`, { headers })
     if (!res.ok) return
     const data = await res.json()
     const arr = Array.isArray(data.reports) ? data.reports : []
@@ -98,9 +99,11 @@ const removeReport = async (idx) => {
   const item = pagedReports.value[idx]
   if (!item) return
   try {
+    const token = localStorage.getItem('token') || ''
+    const auth = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
     const res = await fetch(`${apiBase.value}/api/reports/report/delete`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({ report_name: item.reportName })
     })
     if (!res.ok) throw new Error('delete failed')
@@ -142,10 +145,9 @@ const removeReport = async (idx) => {
                 <td>{{ item.size }}</td>
                 <td>{{ item.createdAt }}</td>
                 <td class="operation">
-                  <button class="btn primary" @click="openReport(item)">查看</button>
-                  <button class="btn success" @click="downloadCSV(item)">下载CSV</button>
-                  <button class="btn info" @click="downloadJSON(item)">下载JSON</button>
-                  <button class="btn danger" @click="removeReport(idx)">删除</button>
+                  <IconButton :src="checkIcon" title="查看" :size="16" :button-size="32" @click="openReport(item)" />
+                  <IconButton :src="downloadIcon" title="下载csv" :size="16" :button-size="32" @click="downloadCSV(item)" />
+                  <IconButton :src="deleteIcon" title="删除" :size="16" :button-size="32" @click="removeReport(idx)" />
                 </td>
               </tr>
               <tr v-if="!reports.length">
@@ -232,41 +234,14 @@ const removeReport = async (idx) => {
   border-bottom: none;
 }
 .operation {
-  text-align: right;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
 }
 .empty {
   text-align: center;
   color: #999;
   padding: 20px 0;
-}
-.btn {
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  background: #f9f9f9;
-  cursor: pointer;
-  font-size: 14px;
-  margin-left: 8px;
-}
-.btn.primary {
-  color: #fff;
-  background: linear-gradient(90deg, #1e50c8 0%, #3a78f4 100%);
-  border-color: #1e50c8;
-}
-.btn.success {
-  color: #fff;
-  background: linear-gradient(90deg, #2db36a 0%, #3fd184 100%);
-  border-color: #2db36a;
-}
-.btn.info {
-  color: #fff;
-  background: linear-gradient(90deg, #10a4d3 0%, #18b6eb 100%);
-  border-color: #10a4d3;
-}
-.btn.danger {
-  color: #fff;
-  background: linear-gradient(90deg, #e04646 0%, #ff5a5a 100%);
-  border-color: #e04646;
 }
 </style>

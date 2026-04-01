@@ -846,8 +846,8 @@ input:checked + .slider:before {
 }
 .btn.primary {
   color: #fff;
-  background: linear-gradient(90deg, #1e50c8 0%, #3a78f4 100%);
-  border-color: #1e50c8;
+  background: #8b5cf6;
+  border-color: #8b5cf6;
 }
 .tips {
   color: #94a3b8;

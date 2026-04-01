@@ -97,8 +97,8 @@ const functionCards = [
 }
 
 .welcome-section {
-  background-color: #6f42c1;
-  color: #fff;
+  background-color: #f5f8ff;
+  color: #0f172a;
   padding: 40px 20px;
   text-align: center;
 }
@@ -164,8 +164,8 @@ const functionCards = [
 
 .system-section {
   padding: 40px 20px;
-  background-color: #6f42c1;
-  color: #fff;
+  background-color: #f5f8ff;
+  color: #0f172a;
 }
 
 .section-title {
@@ -252,7 +252,7 @@ const functionCards = [
 .footer {
   text-align: center;
   padding: 20px;
-  color: #fff;
+  color: #64748b;
   font-size: 14px;
   margin-top: 40px;
 }

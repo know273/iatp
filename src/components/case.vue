@@ -3,9 +3,12 @@ import { ref, computed, onMounted, watch } from 'vue'
 import CollapseCard from './ui/CollapseCard.vue'
 import Pagination from './ui/Pagination.vue'
 import Toast from './ui/Toast.vue'
+import IconButton from './ui/IconButton.vue'
 import caretBottom from '../assets/caret-bottom-svgrepo-com.svg'
 import bookOpen from '../assets/book-open-svgrepo-com.svg'
 import circleCross from '../assets/circle-cross-svgrepo-com.svg'
+import deleteIcon from '../assets/delete.svg'
+import downloadIcon from '../assets/download.svg'
 
 const apiUrl = ref('')
 const apiFile = ref(null)
@@ -151,7 +154,9 @@ const prevPage = () => gotoPage(currentPage.value - 1)
 const nextPage = () => gotoPage(currentPage.value + 1)
 const loadFiles = async () => {
   try {
-    const res = await fetch(`${apiBase.value}/api/cases/files`)
+    const token = localStorage.getItem('token') || ''
+    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
+    const res = await fetch(`${apiBase.value}/api/cases/files`, { headers })
     if (!res.ok) return
     const data = await res.json()
     const files = Array.isArray(data.files) ? data.files : []
@@ -160,7 +165,7 @@ const loadFiles = async () => {
       type: 'CSV',
       size: x.size || '',
       time: x.time || '',
-      url: toAbsUrl(apiBase.value, x.file_path || '')
+      url: ''
     }))
     currentPage.value = 1
   } catch (_) {
@@ -174,16 +179,25 @@ const downloadFile = (f) => {
   if (!f) return
   const name = f.name || ''
   if (!name) return
-  const url = `${apiBase.value.replace(/\/$/, '')}/api/cases/download?file_name=${encodeURIComponent(name)}`
+  const token = localStorage.getItem('token') || ''
+  if (!token || token.split('.').length !== 3) {
+    toastType.value = 'error'
+    toastMsg.value = '请先登录'
+    toastShow.value = true
+    return
+  }
+  const url = `${apiBase.value.replace(/\/$/, '')}/api/cases/download?file_name=${encodeURIComponent(name)}&token=${encodeURIComponent(token)}`
   window.open(url, '_blank')
 }
 const deleteFile = (f) => {
   if (!f) return
   const name = f.name || ''
   if (!name) return
+  const token = localStorage.getItem('token') || ''
+  const auth = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
   fetch(`${apiBase.value}/api/cases/delete`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...auth },
     body: JSON.stringify({ file_name: name })
   })
     .then(async (res) => {
@@ -214,8 +228,11 @@ const uploadCase = async () => {
   try {
     const fd = new FormData()
     fd.append('file', upFile.value)
+    const token = localStorage.getItem('token') || ''
+    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
     const res = await fetch(`${apiBase.value}/api/cases/upload`, {
       method: 'POST',
+      headers,
       body: fd
     })
     if (!res.ok) throw new Error('上传失败')
@@ -388,9 +405,9 @@ const downloadCsvTpl = () => {
               <td>{{ f.type }}</td>
               <td>{{ f.size }}</td>
               <td>{{ f.time }}</td>
-              <td>
-                <button class="btn sm success" @click="downloadFile(f)">下载</button>
-                <button class="btn sm danger" @click="deleteFile(f)">删除</button>
+              <td class="operation">
+                <IconButton :src="downloadIcon" title="下载" :size="16" :button-size="28" @click="downloadFile(f)" />
+                <IconButton :src="deleteIcon" title="删除" :size="16" :button-size="28" @click="deleteFile(f)" />
               </td>
             </tr>
             <tr v-if="uploadedFiles.length === 0">
@@ -545,8 +562,8 @@ const downloadCsvTpl = () => {
 }
 .btn.primary {
   color: #fff;
-  background: linear-gradient(90deg, #1e50c8 0%, #3a78f4 100%);
-  border-color: #1e50c8;
+  background: #8b5cf6;
+  border-color: #8b5cf6;
 }
 .btn.upload {
   position: relative;
@@ -677,6 +694,12 @@ const downloadCsvTpl = () => {
   display: flex;
   gap: 8px;
   margin-bottom: 10px;
+}
+.operation {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
 }
 .btn.sm {
   height: 28px;

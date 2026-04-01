@@ -1,6 +1,7 @@
 <!-- App.vue -->
 <template>
   <div class="app-container">
+    <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
     <!-- 顶部导航栏 -->
     <header class="header">
       <div class="header-title">接口自动化测试平台 V1.0.0</div>
@@ -20,6 +21,7 @@
             :class="['menu-item', { active: activeMenu === item.path }]"
             @click="(activeMenu = item.path, router.push(item.path))"
           >
+            <img v-if="item.icon" class="menu-icon" :src="item.icon" alt="" />
             {{ item.name }}
           </div>
         </div>
@@ -35,24 +37,37 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import Toast from './ui/Toast.vue'
+import iconHome from '../assets/home.svg'
+import iconConfig from '../assets/config.svg'
+import iconCase from '../assets/case.svg'
+import iconExecute from '../assets/execute.svg'
+import iconReport from '../assets/report.svg'
+import iconGuide from '../assets/guide.svg'
 
 const activeMenu = ref('/main/home')
 const currentUser = ref(localStorage.getItem('username') || '')
 const router = useRouter()
 const route = useRoute()
+const toastShow = ref(false)
+const toastMsg = ref('')
+const toastType = ref('success')
 const handleLogout = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
+  toastType.value = 'success'
+  toastMsg.value = '退出登录成功'
+  toastShow.value = true
   router.push('/login')
 }
 
 const menuItems = [
-  { name: '首页', path: '/main/home' },
-  { name: '配置管理', path: '/main/config' },
-  { name: '用例管理', path: '/main/case' },
-  { name: '执行测试', path: '/main/execute' },
-  { name: '测试报告', path: '/main/report' },
-  { name: '平台操作指南', path: '/main/guide' }
+  { name: '首页', path: '/main/home', icon: iconHome },
+  { name: '配置管理', path: '/main/config', icon: iconConfig },
+  { name: '用例管理', path: '/main/case', icon: iconCase },
+  { name: '执行测试', path: '/main/execute', icon: iconExecute },
+  { name: '测试报告', path: '/main/report', icon: iconReport },
+  { name: '平台操作指南', path: '/main/guide', icon: iconGuide }
 ]
 
 watch(
@@ -130,17 +145,31 @@ watch(
 }
 
 .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 12px 20px;
   color: #333;
   cursor: pointer;
   transition: all 0.3s;
 }
+.menu-icon {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  object-fit: cover;
+  opacity: 0.9;
+}
 
-.menu-item.active {
-  background-color: #6f42c1;
-  color: #fff;
+.menu-item.active {   
+  background-color: #e5edfa;
+  color: #1664ff;
   border-radius: 4px;
   margin: 0 8px;
+}
+.menu-item.active .menu-icon {
+  /* filter: brightness(0) invert(1); */
+  opacity: 1;
 }
 
 .menu-item:hover:not(.active) {

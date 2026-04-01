@@ -36,14 +36,6 @@ const handleLogin = async () => {
   if (!password.value) loginErrors.value.password = '访问密码必填'
   if (loginErrors.value.username || loginErrors.value.password) return
 
-  if (username.value === '6' && password.value === '6') {
-    localStorage.setItem('token', 'superuser-local')
-    localStorage.setItem('username', username.value)
-    showToast('欢迎超级用户', 'success')
-    setTimeout(() => router.push('/main'), 250)
-    return
-  }
-
   try {
     const res = await fetch(`${base}/api/login`, {
       method: 'POST',

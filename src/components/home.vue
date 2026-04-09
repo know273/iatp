@@ -28,17 +28,14 @@
         <div class="system-card">
           <h3 class="card-subtitle">环境配置</h3>
           <div class="card-item">当前环境: TEST</div>
-          <div class="card-item">最大并发数: 1</div>
         </div>
         <div class="system-card">
           <h3 class="card-subtitle">测试用例</h3>
-          <div class="card-item">CSV文件: 0 个</div>
-          <div class="card-item">Excel文件: 0 个</div>
+          <div class="card-item">CSV文件: {{ csvCount }} 个</div>
         </div>
         <div class="system-card">
           <h3 class="card-subtitle">测试报告</h3>
-          <div class="card-item">HTML报告: 0 个</div>
-          <div class="card-item">JSON报告: 0 个</div>
+          <div class="card-item">HTML报告: {{ htmlReportCount }} 个</div>
         </div>
       </div>
 
@@ -58,26 +55,33 @@
 </template>
 
 <script setup>
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { csvCount, htmlReportCount, refreshStats } from '../stores/systemStats'
 
 const router = useRouter()
+const apiBase = computed(() => import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000')
+
+onMounted(() => {
+  refreshStats(apiBase.value)
+})
 
 const functionCards = [
   {
     title: '配置管理',
-    desc: '支持全局配置、多环境配置，灵活管理测试参数',
+    desc: '配置服务器地址与大模型',
     btnText: '进入配置',
     path: '/main/config'
   },
   {
     title: '用例管理',
-    desc: '支持API文档、Excel/CSV，可视化管理',
+    desc: '支持上传API文档、CSV，生成、管理测试用例',
     btnText: '进入管理',
     path: '/main/case'
   },
   {
     title: '执行测试',
-    desc: '高性能并发执行，实时监控测试进度',
+    desc: '根据测试用例执行测试',
     btnText: '开始执行',
     path: '/main/execute'
   },

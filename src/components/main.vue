@@ -38,6 +38,7 @@
 import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Toast from './ui/Toast.vue'
+import { clearAuth } from '../utils/api'
 import iconHome from '../assets/home.svg'
 import iconConfig from '../assets/config.svg'
 import iconCase from '../assets/case.svg'
@@ -53,8 +54,7 @@ const toastShow = ref(false)
 const toastMsg = ref('')
 const toastType = ref('success')
 const handleLogout = () => {
-  localStorage.removeItem('token')
-  localStorage.removeItem('username')
+  clearAuth()
   toastType.value = 'success'
   toastMsg.value = '退出登录成功'
   toastShow.value = true

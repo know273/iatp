@@ -4,10 +4,12 @@ import { useRouter } from 'vue-router'
 import Toast from './ui/Toast.vue'
 import Pagination from './ui/Pagination.vue'
 import IconButton from './ui/IconButton.vue'
+import TaskCard from './ui/TaskCard.vue'
 import checkIcon from '../assets/check.svg'
 import deleteIcon from '../assets/delete.svg'
+import { apiFetch } from '../utils/api'
 
-const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
+const apiBase = computed(() => import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000')
 const baseUrl = computed(() => localStorage.getItem('baseUrl') || '')
 const toAbsUrl = (base, rel) => {
   const p = String(rel || '').replace(/^\\+|^\/+/, '').replace(/\\/g, '/')
@@ -17,24 +19,16 @@ const toAbsUrl = (base, rel) => {
 const files = ref([])
 const selectedFile = ref(files.value[0] || '')
 const env = ref('test')
-const concurrency = ref(1)
 const running = ref(false)
 const success = ref(false)
+const taskId = ref('')
+const taskStatus = ref('')
+const taskProgress = ref(0)
+const taskError = ref('')
 const toastShow = ref(false)
 const toastMsg = ref('')
 const toastType = ref('success')
-const history = ref([
-  {
-    executedAt: '2026-02-19 20:36:07',
-    fileName: 'news-csv.csv',
-    reportName: 'test_report_20260219_203608.html',
-    total: 2,
-    passed: 2,
-    failed: 0,
-    passRate: '100.00%',
-    reportUrl: '/reports/test_report_20260219_203608.html'
-  }
-])
+const history = ref([])
 const router = useRouter()
 const currentPage = ref(1)
 const pageSize = 10
@@ -68,36 +62,62 @@ const startRun = async () => {
   if (!baseUrl.value) return
   running.value = true
   success.value = false
+  taskError.value = ''
+  taskProgress.value = 0
   try {
-    const token = localStorage.getItem('token') || ''
-    const auth = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
     const body = {
       file_name: selectedFile.value,
       env: env.value,
-      concurrency: Number(concurrency.value) || 1,
       base_url: baseUrl.value
     }
-    const res = await fetch(`${apiBase.value}/api/execute/run`, {
+    const res = await apiFetch(`${apiBase.value}/api/execute/run-async`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...auth },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     })
-    if (!res.ok) throw new Error('执行失败')
+    if (res.status !== 202 && res.status !== 409) throw new Error('执行失败')
     const data = await res.json()
-    const now = new Date()
-    history.value.unshift({
-      executedAt: formatTime(now),
-      fileName: selectedFile.value,
-      reportName: data.report_name,
-      total: data.total,
-      passed: data.passed,
-      failed: data.failed,
-      passRate: data.pass_rate,
-      reportUrl: data.report_url
-    })
-    success.value = true
+    taskId.value = data.task_id || ''
+    taskStatus.value = data.status || ''
+    if (!taskId.value) throw new Error('任务创建失败')
+    let guard = 0
+    while (guard < 1200) {
+      guard += 1
+      const st = await apiFetch(`${apiBase.value}/api/tasks/${encodeURIComponent(taskId.value)}`)
+      if (!st.ok) throw new Error('获取任务状态失败')
+      const sdata = await st.json()
+      taskStatus.value = sdata.status || ''
+      taskProgress.value = Number(sdata.progress) || 0
+      taskError.value = sdata.error || ''
+      if (taskStatus.value === 'done') {
+        const result = sdata.result || {}
+        const nowText = result.createdAt || formatTime(new Date())
+        history.value.unshift({
+          executedAt: nowText,
+          fileName: selectedFile.value,
+          reportName: result.report_name || sdata.report_name || '',
+          total: result.total || '',
+          passed: result.passed || '',
+          failed: result.failed || '',
+          passRate: result.pass_rate || '',
+          reportUrl: ''
+        })
+        success.value = true
+        toastType.value = 'success'
+        toastMsg.value = '执行成功'
+        toastShow.value = true
+        break
+      }
+      if (taskStatus.value === 'failed') {
+        throw new Error(taskError.value || '执行失败')
+      }
+      await new Promise((r) => setTimeout(r, 800))
+    }
   } catch (e) {
     success.value = false
+    toastType.value = 'error'
+    toastMsg.value = String(e && e.message ? e.message : '执行失败')
+    toastShow.value = true
   } finally {
     running.value = false
   }
@@ -109,9 +129,7 @@ const clearHistory = () => {
 }
 const viewReport = async (item) => {
   try {
-    const token = localStorage.getItem('token') || ''
-    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-    const res = await fetch(`${apiBase.value}/api/reports/report/exists?report_name=${encodeURIComponent(item.reportName)}`, { headers })
+    const res = await apiFetch(`${apiBase.value}/api/reports/report/exists?report_name=${encodeURIComponent(item.reportName)}`)
     const data = await res.json()
     if (!data.exists) {
       toastType.value = 'error'
@@ -126,21 +144,20 @@ const viewReport = async (item) => {
 
 const loadFiles = async () => {
   try {
-    const token = localStorage.getItem('token') || ''
-    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-    const res = await fetch(`${apiBase.value}/api/cases/files`, { headers })
+    const res = await apiFetch(`${apiBase.value}/api/cases/files`)
     if (!res.ok) return
     const data = await res.json()
     const arr = Array.isArray(data.files) ? data.files : []
-    files.value = arr.map(x => x.file_name || '').filter(Boolean)
+    files.value = arr
+      .map(x => x.file_name || '')
+      .filter(Boolean)
+      .filter(x => String(x).toLowerCase().endsWith('.csv'))
     selectedFile.value = files.value[0] || ''
   } catch (_) {}
 }
 const loadHistory = async () => {
   try {
-    const token = localStorage.getItem('token') || ''
-    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-    const res = await fetch(`${apiBase.value}/api/reports/history/files`, { headers })
+    const res = await apiFetch(`${apiBase.value}/api/reports/history/files`)
     if (!res.ok) return
     const data = await res.json()
     const arr = Array.isArray(data.reports) ? data.reports : []
@@ -160,11 +177,9 @@ const loadHistory = async () => {
 
 const deleteHistoryReport = async (item) => {
   try {
-    const token = localStorage.getItem('token') || ''
-    const auth = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-    const res = await fetch(`${apiBase.value}/api/reports/history/delete`, {
+    const res = await apiFetch(`${apiBase.value}/api/reports/history/delete`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...auth },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ report_name: item.reportName })
     })
     if (!res.ok) throw new Error('delete failed')
@@ -213,11 +228,6 @@ onMounted(() => {
           <input class="input" :value="baseUrl" disabled />
           <div class="tips">用于拼接完整接口：base_url + 请求URL</div>
         </div>
-        <div class="form-item">
-          <label class="label">并发数</label>
-          <input class="input" type="number" min="1" v-model="concurrency" />
-          <div class="tips">设置测试执行的并发数，根据系统性能调整</div>
-        </div>
         <div>
           <button class="btn primary" @click="startRun">开始执行</button>
         </div>
@@ -227,7 +237,18 @@ onMounted(() => {
     <section class="card">
       <div class="card-title">执行状态</div>
       <div class="card-body">
-        <div v-if="running" class="status info">执行中... 请稍候</div>
+        <TaskCard
+          v-if="taskId"
+          title="执行任务"
+          :status="taskStatus || (running ? 'running' : (success ? 'done' : ''))"
+          :progress="taskProgress"
+          :subtitle="selectedFile ? `用例文件：${selectedFile}` : ''"
+        >
+          <div v-if="taskError" style="color:#ef4444">{{ taskError }}</div>
+          <div v-else-if="taskStatus === 'running' || running">执行中：{{ taskProgress }}%</div>
+          <div v-else-if="taskStatus === 'done' || success">执行完成</div>
+        </TaskCard>
+        <div v-else-if="running" class="status info">执行中... 请稍候</div>
         <div v-else-if="success" class="status ok">执行成功！测试执行完成！</div>
       </div>
     </section>

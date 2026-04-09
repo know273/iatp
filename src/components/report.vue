@@ -7,9 +7,11 @@ import IconButton from './ui/IconButton.vue'
 import checkIcon from '../assets/check.svg'
 import deleteIcon from '../assets/delete.svg'
 import downloadIcon from '../assets/download.svg'
+import { apiFetch } from '../utils/api'
+import { setHtmlReportCount } from '../stores/systemStats'
 
 const route = useRoute()
-const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
+const apiBase = computed(() => import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000')
 const toAbsUrl = (base, rel) => {
   const p = String(rel || '').replace(/^\\+|^\/+/, '').replace(/\\/g, '/')
   return String(base).replace(/\/$/, '') + '/' + p
@@ -41,10 +43,16 @@ const ensureQueryReport = () => {
 ensureQueryReport()
 
 const openReport = async (item) => {
+  const token = localStorage.getItem('token') || ''
+  const refreshToken = localStorage.getItem('refresh_token') || ''
+  if ((!token || token.split('.').length !== 3) && (!refreshToken || refreshToken.split('.').length !== 3)) {
+    toastType.value = 'error'
+    toastMsg.value = '请先登录'
+    toastShow.value = true
+    return
+  }
   try {
-    const token = localStorage.getItem('token') || ''
-    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-    const res = await fetch(`${apiBase.value}/api/reports/report/exists?report_name=${encodeURIComponent(item.reportName)}`, { headers })
+    const res = await apiFetch(`${apiBase.value}/api/reports/report/exists?report_name=${encodeURIComponent(item.reportName)}`)
     const data = await res.json()
     if (!data.exists) {
       toastType.value = 'error'
@@ -54,15 +62,17 @@ const openReport = async (item) => {
     }
   } catch (_) {
   }
-  const token = localStorage.getItem('token') || ''
-  if (!token || token.split('.').length !== 3) {
+  try {
+    const res = await apiFetch(`${apiBase.value}/api/reports/report/signed-url?report_name=${encodeURIComponent(item.reportName)}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    if (!data || !data.url) throw new Error('missing url')
+    window.open(toAbsUrl(apiBase.value, data.url), '_blank')
+  } catch (_) {
     toastType.value = 'error'
-    toastMsg.value = '请先登录'
+    toastMsg.value = '打开失败'
     toastShow.value = true
-    return
   }
-  const url = toAbsUrl(apiBase.value, `/api/reports/report/view?report_name=${encodeURIComponent(item.reportName)}&token=${encodeURIComponent(token)}`)
-  window.open(url, '_blank')
 }
 
 const downloadCSV = (item) => {
@@ -79,9 +89,7 @@ const downloadCSV = (item) => {
 
 const loadReports = async () => {
   try {
-    const token = localStorage.getItem('token') || ''
-    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-    const res = await fetch(`${apiBase.value}/api/reports/report/files`, { headers })
+    const res = await apiFetch(`${apiBase.value}/api/reports/report/files`)
     if (!res.ok) return
     const data = await res.json()
     const arr = Array.isArray(data.reports) ? data.reports : []
@@ -90,6 +98,7 @@ const loadReports = async () => {
       size: x.size,
       createdAt: x.createdAt
     }))
+    setHtmlReportCount(reports.value.length)
     currentPage.value = 1
   } catch (_) {}
 }
@@ -99,16 +108,15 @@ const removeReport = async (idx) => {
   const item = pagedReports.value[idx]
   if (!item) return
   try {
-    const token = localStorage.getItem('token') || ''
-    const auth = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-    const res = await fetch(`${apiBase.value}/api/reports/report/delete`, {
+    const res = await apiFetch(`${apiBase.value}/api/reports/report/delete`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...auth },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ report_name: item.reportName })
     })
     if (!res.ok) throw new Error('delete failed')
     const realIndex = reports.value.findIndex(x => x.reportName === item.reportName)
     if (realIndex >= 0) reports.value.splice(realIndex, 1)
+    setHtmlReportCount(reports.value.length)
     if (currentPage.value > Math.max(1, Math.ceil(reports.value.length / pageSize))) currentPage.value = Math.max(1, Math.ceil(reports.value.length / pageSize))
     toastType.value = 'success'
     toastMsg.value = '删除成功'

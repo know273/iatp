@@ -3,6 +3,7 @@ import { ref } from 'vue'
 
 import { useRouter } from 'vue-router'
 import Toast from './ui/Toast.vue'
+import { apiFetch, setAccessToken, setRefreshToken } from '../utils/api'
 
 const router = useRouter()
 
@@ -37,10 +38,11 @@ const handleLogin = async () => {
   if (loginErrors.value.username || loginErrors.value.password) return
 
   try {
-    const res = await fetch(`${base}/api/login`, {
+    const res = await apiFetch(`${base}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username.value, password: password.value })
+      body: JSON.stringify({ username: username.value, password: password.value }),
+      skipAuth: true
     })
     if (!res.ok) {
       const text = await res.text()
@@ -49,7 +51,8 @@ const handleLogin = async () => {
     }
     const data = await res.json()
     if (data && data.token) {
-      localStorage.setItem('token', data.token)
+      setAccessToken(data.token)
+      setRefreshToken(data.refresh_token || '')
       localStorage.setItem('username', username.value)
       showToast('登录成功', 'success')
       setTimeout(() => router.push('/main'), 250)
@@ -78,10 +81,11 @@ const handleRegister = async () => {
   }
 
   try {
-    const res = await fetch(`${base}/api/register`, {
+    const res = await apiFetch(`${base}/api/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: u, password: p1 })
+      body: JSON.stringify({ username: u, password: p1 }),
+      skipAuth: true
     })
 
     if (!res.ok) {

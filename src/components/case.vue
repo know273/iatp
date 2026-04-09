@@ -4,13 +4,16 @@ import CollapseCard from './ui/CollapseCard.vue'
 import Pagination from './ui/Pagination.vue'
 import Toast from './ui/Toast.vue'
 import IconButton from './ui/IconButton.vue'
+import TaskCard from './ui/TaskCard.vue'
 import caretBottom from '../assets/caret-bottom-svgrepo-com.svg'
 import bookOpen from '../assets/book-open-svgrepo-com.svg'
 import circleCross from '../assets/circle-cross-svgrepo-com.svg'
 import deleteIcon from '../assets/delete.svg'
 import downloadIcon from '../assets/download.svg'
+import checkIcon from '../assets/check.svg'
+import { apiFetch } from '../utils/api'
+import { setCsvCount } from '../stores/systemStats'
 
-const apiUrl = ref('')
 const apiFile = ref(null)
 const apiFileInput = ref(null)
 const outputName = ref('autointerface_test_cases')
@@ -19,9 +22,14 @@ const uploadOpen = ref(true)
 const filesOpen = ref(true)
 const tplOpen = ref(true)
 const generating = ref(false)
+const genTaskId = ref('')
+const genTaskStatus = ref('')
+const genTaskProgress = ref(0)
+const genTaskError = ref('')
+const genResult = ref(null)
 const genError = ref('')
 const aiReply = ref('')
-const apiBase = computed(() => import.meta.env.VITE_API_BASE || localStorage.getItem('apiBase') || 'http://127.0.0.1:5000')
+const apiBase = computed(() => import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000')
 
 const onPickFile = (e) => {
   const f = e.target.files && e.target.files[0]
@@ -59,43 +67,54 @@ const genFromApiDoc = async () => {
     return
   }
   genError.value = ''
-  if (!apiFile.value && !apiUrl.value) {
-    genError.value = '请选择文件或输入URL'
+  if (!apiFile.value) {
+    genError.value = '请选择文件'
     return
   }
   generating.value = true
+  genTaskError.value = ''
+  genResult.value = null
+  genTaskProgress.value = 0
   try {
     const fd = new FormData()
     fd.append('output_name', outputName.value || 'autointerface_test_cases')
     if (apiFile.value) fd.append('file', apiFile.value)
-    if (apiUrl.value) fd.append('doc_url', apiUrl.value)
-    const token = localStorage.getItem('token') || ''
-    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-    const res = await fetch(`${apiBase.value}/api/cases/generate-from-doc`, {
+    const res = await apiFetch(`${apiBase.value}/api/cases/generate-async`, {
       method: 'POST',
-      headers,
       body: fd
     })
-    if (!res.ok) {
+    if (res.status !== 202 && res.status !== 409) {
       const text = await res.text()
       throw new Error(text || '生成失败')
     }
     const data = await res.json()
-    const path = data.file_path || data.file_name || ''
-    if (path) {
-      const item = {
-        name: baseName(path || outputName.value + '.csv'),
-        url: path ? toAbsUrl(apiBase.value, path) : '',
-        type: 'CSV',
-        size: data.size || '未知',
-        time: data.time || new Date().toISOString().replace('T',' ').slice(0,19)
+    genTaskId.value = data.task_id || ''
+    genTaskStatus.value = data.status || ''
+    if (!genTaskId.value) throw new Error('任务创建失败')
+    let guard = 0
+    while (guard < 1200) {
+      guard += 1
+      const st = await apiFetch(`${apiBase.value}/api/tasks/${encodeURIComponent(genTaskId.value)}`)
+      if (!st.ok) throw new Error('获取任务状态失败')
+      const sdata = await st.json()
+      genTaskStatus.value = sdata.status || ''
+      genTaskProgress.value = Number(sdata.progress) || 0
+      genTaskError.value = sdata.error || ''
+      if (genTaskStatus.value === 'done') {
+        genResult.value = sdata.result || null
+        const r = sdata.result || {}
+        aiReply.value = r.ai_reply_preview ? String(r.ai_reply_preview) : ''
+        await loadFiles()
+        toastType.value = 'success'
+        toastMsg.value = '生成成功'
+        toastShow.value = true
+        break
       }
-      uploadedFiles.value.unshift(item)
+      if (genTaskStatus.value === 'failed') {
+        throw new Error(genTaskError.value || '生成失败')
+      }
+      await new Promise((r) => setTimeout(r, 800))
     }
-    toastType.value = 'success'
-    toastMsg.value = '生成成功'
-    toastShow.value = true
-    aiReply.value = data.ai_reply ? String(data.ai_reply) : ''
   } catch (e) {
     genError.value = e && e.message ? e.message : '生成失败'
   } finally {
@@ -117,6 +136,23 @@ const copyAiReply = async () => {
     toastShow.value = true
   }
 }
+const viewFullAiReply = async () => {
+  const r = genResult.value || null
+  const fname = r && r.file_name ? String(r.file_name) : ''
+  if (!fname) return
+  if (aiReply.value && !aiReply.value.includes('...(truncated)')) return
+  try {
+    const res = await apiFetch(`${apiBase.value}/api/cases/ai-reply?file_name=${encodeURIComponent(fname)}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    aiReply.value = data && data.ai_reply ? String(data.ai_reply) : ''
+    if (!aiReply.value) throw new Error('empty')
+  } catch (_) {
+    toastType.value = 'error'
+    toastMsg.value = '获取完整回复失败'
+    toastShow.value = true
+  }
+}
 const toggleGen = () => {
   genOpen.value = !genOpen.value
 }
@@ -131,6 +167,167 @@ const toggleTpl = () => {
 }
 
 const uploadedFiles = ref([])
+const fileType = (name) => {
+  const n = String(name || '').toLowerCase()
+  if (n.endsWith('.csv')) return 'CSV'
+  if (n.endsWith('.ai.txt')) return 'TXT'
+  const segs = n.split('.')
+  if (segs.length >= 2) return segs[segs.length - 1].toUpperCase()
+  return ''
+}
+const isCsv = (name) => String(name || '').toLowerCase().endsWith('.csv')
+
+const csvCache = new Map()
+const csvEditorOpen = ref(false)
+const csvEditorFileName = ref('')
+const csvEditorText = ref('')
+const csvEditorHeaders = ref([])
+const csvEditorRows = ref([])
+const csvEditorSaving = ref(false)
+
+const parseCsv = (text) => {
+  const s = String(text || '').replace(/^\uFEFF/, '')
+  const rows = []
+  let row = []
+  let field = ''
+  let inQuotes = false
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i]
+    if (inQuotes) {
+      if (ch === '"') {
+        const next = s[i + 1]
+        if (next === '"') {
+          field += '"'
+          i += 1
+        } else {
+          inQuotes = false
+        }
+      } else {
+        field += ch
+      }
+      continue
+    }
+    if (ch === '"') {
+      inQuotes = true
+      continue
+    }
+    if (ch === ',') {
+      row.push(field)
+      field = ''
+      continue
+    }
+    if (ch === '\n') {
+      row.push(field)
+      field = ''
+      if (row.length > 1 || (row.length === 1 && row[0] !== '')) rows.push(row)
+      row = []
+      continue
+    }
+    if (ch === '\r') continue
+    field += ch
+  }
+  row.push(field)
+  if (row.length > 1 || (row.length === 1 && row[0] !== '')) rows.push(row)
+  const headers = rows[0] || []
+  const body = rows.slice(1).map(r => {
+    const obj = {}
+    for (let j = 0; j < headers.length; j += 1) {
+      obj[headers[j]] = r[j] !== undefined ? r[j] : ''
+    }
+    return obj
+  })
+  return { headers, body }
+}
+
+const stringifyCsv = (headers, body) => {
+  const esc = (v) => {
+    const t = v === null || v === undefined ? '' : String(v)
+    const need = t.includes('"') || t.includes(',') || t.includes('\n') || t.includes('\r')
+    const out = t.replace(/"/g, '""')
+    return need ? `"${out}"` : out
+  }
+  const lines = []
+  lines.push((headers || []).map(esc).join(','))
+  for (const r of body || []) {
+    lines.push((headers || []).map(h => esc(r[h])).join(','))
+  }
+  return lines.join('\r\n')
+}
+
+const isLongCol = (h) => {
+  const name = String(h || '')
+  return name.includes('参数') || name.includes('结果') || name.includes('URL')
+}
+
+const openCsvEditor = async (f) => {
+  const name = f && f.name ? String(f.name) : ''
+  if (!name) return
+  if (!isCsv(name)) {
+    toastType.value = 'error'
+    toastMsg.value = '仅支持CSV类型编辑'
+    toastShow.value = true
+    return
+  }
+  if (csvEditorOpen.value && csvEditorFileName.value === name) return
+  csvEditorFileName.value = name
+  csvEditorOpen.value = true
+  if (csvCache.has(name)) {
+    const cached = csvCache.get(name) || null
+    if (cached && cached.headers && cached.body) {
+      csvEditorHeaders.value = cached.headers
+      csvEditorRows.value = cached.body
+      csvEditorText.value = cached.text || ''
+      return
+    }
+    csvEditorText.value = cached || ''
+    return
+  }
+  try {
+    const res = await apiFetch(`${apiBase.value}/api/cases/csv?file_name=${encodeURIComponent(name)}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    csvEditorText.value = data && data.csv ? String(data.csv) : ''
+    const parsed = parseCsv(csvEditorText.value)
+    csvEditorHeaders.value = parsed.headers
+    csvEditorRows.value = parsed.body
+    csvCache.set(name, { text: csvEditorText.value, headers: csvEditorHeaders.value, body: csvEditorRows.value })
+  } catch (_) {
+    toastType.value = 'error'
+    toastMsg.value = '读取文件失败'
+    toastShow.value = true
+  }
+}
+const closeCsvEditor = () => {
+  csvEditorOpen.value = false
+}
+const saveCsvEditor = async () => {
+  const name = csvEditorFileName.value
+  if (!name) return
+  if (csvEditorSaving.value) return
+  csvEditorSaving.value = true
+  try {
+    const csv = stringifyCsv(csvEditorHeaders.value, csvEditorRows.value)
+    const res = await apiFetch(`${apiBase.value}/api/cases/csv?file_name=${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csv })
+    })
+    if (!res.ok) throw new Error(await res.text())
+    csvEditorText.value = csv
+    csvCache.set(name, { text: csvEditorText.value, headers: csvEditorHeaders.value, body: csvEditorRows.value })
+    await loadFiles()
+    toastType.value = 'success'
+    toastMsg.value = '保存成功'
+    toastShow.value = true
+    csvEditorOpen.value = false
+  } catch (_) {
+    toastType.value = 'error'
+    toastMsg.value = '保存失败'
+    toastShow.value = true
+  } finally {
+    csvEditorSaving.value = false
+  }
+}
 const pageSize = 10
 const currentPage = ref(1)
 const totalItems = computed(() => uploadedFiles.value.length)
@@ -154,19 +351,18 @@ const prevPage = () => gotoPage(currentPage.value - 1)
 const nextPage = () => gotoPage(currentPage.value + 1)
 const loadFiles = async () => {
   try {
-    const token = localStorage.getItem('token') || ''
-    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-    const res = await fetch(`${apiBase.value}/api/cases/files`, { headers })
+    const res = await apiFetch(`${apiBase.value}/api/cases/files`)
     if (!res.ok) return
     const data = await res.json()
     const files = Array.isArray(data.files) ? data.files : []
     uploadedFiles.value = files.map(x => ({
       name: x.file_name || '',
-      type: 'CSV',
+      type: fileType(x.file_name || ''),
       size: x.size || '',
       time: x.time || '',
       url: ''
     }))
+    setCsvCount(uploadedFiles.value.filter((x) => String(x && x.name ? x.name : '').toLowerCase().endsWith('.csv')).length)
     currentPage.value = 1
   } catch (_) {
   }
@@ -175,29 +371,43 @@ onMounted(loadFiles)
 watch(uploadedFiles, () => {
   if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
 })
-const downloadFile = (f) => {
+const downloadFile = async (f) => {
   if (!f) return
   const name = f.name || ''
   if (!name) return
   const token = localStorage.getItem('token') || ''
-  if (!token || token.split('.').length !== 3) {
+  const refreshToken = localStorage.getItem('refresh_token') || ''
+  if ((!token || token.split('.').length !== 3) && (!refreshToken || refreshToken.split('.').length !== 3)) {
     toastType.value = 'error'
     toastMsg.value = '请先登录'
     toastShow.value = true
     return
   }
-  const url = `${apiBase.value.replace(/\/$/, '')}/api/cases/download?file_name=${encodeURIComponent(name)}&token=${encodeURIComponent(token)}`
-  window.open(url, '_blank')
+  try {
+    const res = await apiFetch(`${apiBase.value}/api/cases/download-signed-url?file_name=${encodeURIComponent(name)}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    if (!data || !data.url) throw new Error('missing url')
+    window.open(toAbsUrl(apiBase.value, data.url), '_blank')
+  } catch (_) {
+    toastType.value = 'error'
+    toastMsg.value = '下载失败'
+    toastShow.value = true
+  }
+}
+const downloadGenerated = () => {
+  const r = genResult.value || null
+  const fname = r && r.file_name ? String(r.file_name) : ''
+  if (!fname) return
+  downloadFile({ name: fname })
 }
 const deleteFile = (f) => {
   if (!f) return
   const name = f.name || ''
   if (!name) return
-  const token = localStorage.getItem('token') || ''
-  const auth = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-  fetch(`${apiBase.value}/api/cases/delete`, {
+  apiFetch(`${apiBase.value}/api/cases/delete`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...auth },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ file_name: name })
   })
     .then(async (res) => {
@@ -228,11 +438,8 @@ const uploadCase = async () => {
   try {
     const fd = new FormData()
     fd.append('file', upFile.value)
-    const token = localStorage.getItem('token') || ''
-    const headers = token && token.split('.').length === 3 ? { Authorization: `Bearer ${token}` } : {}
-    const res = await fetch(`${apiBase.value}/api/cases/upload`, {
+    const res = await apiFetch(`${apiBase.value}/api/cases/upload`, {
       method: 'POST',
-      headers,
       body: fd
     })
     if (!res.ok) throw new Error('上传失败')
@@ -314,10 +521,6 @@ const downloadCsvTpl = () => {
       </div>
       <div v-show="genOpen" class="card-body">
         <div class="form-item">
-          <label class="label">API文档URL</label>
-          <input class="input" v-model="apiUrl" placeholder="例如: https://api.example.com/swagger.json" />
-        </div>
-        <div class="form-item">
           <label class="label">API文档文件</label>
           <div class="file-line">
             <label class="btn upload">
@@ -344,6 +547,21 @@ const downloadCsvTpl = () => {
         <div>
           <button class="btn primary" @click="genFromApiDoc">生成测试用例</button>
         </div>
+        <div style="margin-top:12px" v-if="genTaskId">
+          <TaskCard
+            title="生成用例任务"
+            :status="genTaskStatus || (generating ? 'running' : '')"
+            :progress="genTaskProgress"
+            :subtitle="outputName ? `输出前缀：${outputName}` : ''"
+          >
+            <div v-if="genTaskError" style="color:#ef4444">{{ genTaskError }}</div>
+            <div v-else-if="genTaskStatus === 'running' || generating">生成中：{{ genTaskProgress }}%</div>
+            <div v-else-if="genTaskStatus === 'done' && genResult">已生成：{{ genResult.file_name }}</div>
+            <template #actions v-if="genTaskStatus === 'done' && genResult">
+              <button class="btn primary" type="button" @click="downloadGenerated">下载用例</button>
+            </template>
+          </TaskCard>
+        </div>
         <div class="gen-status" v-if="generating">
           <div class="spinner"></div>
           <span class="gen-text">生成中</span>
@@ -352,6 +570,7 @@ const downloadCsvTpl = () => {
         <div class="ai-reply" v-if="aiReply">
           <div class="ai-reply-head">
             <span class="ai-reply-title">模型回复</span>
+            <button v-if="genResult && genResult.file_name" class="btn sm" type="button" @click="viewFullAiReply">查看完整</button>
             <button class="btn sm" type="button" @click="copyAiReply">复制</button>
           </div>
           <pre class="ai-reply-body">{{ aiReply }}</pre>
@@ -406,6 +625,7 @@ const downloadCsvTpl = () => {
               <td>{{ f.size }}</td>
               <td>{{ f.time }}</td>
               <td class="operation">
+                <IconButton v-if="isCsv(f.name)" :src="checkIcon" title="查看" :size="16" :button-size="28" @click="openCsvEditor(f)" />
                 <IconButton :src="downloadIcon" title="下载" :size="16" :button-size="28" @click="downloadFile(f)" />
                 <IconButton :src="deleteIcon" title="删除" :size="16" :button-size="28" @click="deleteFile(f)" />
               </td>
@@ -448,6 +668,35 @@ const downloadCsvTpl = () => {
           </tbody>
         </table>
       </CollapseCard>
+    <div v-if="csvEditorOpen" class="modal-mask" @click.self="closeCsvEditor">
+      <div class="modal">
+        <div class="modal-head">
+          <div class="modal-title">编辑CSV：{{ csvEditorFileName }}</div>
+          <button class="btn sm" type="button" @click="closeCsvEditor">关闭</button>
+        </div>
+        <div class="csv-table-wrap">
+          <table class="csv-table">
+            <thead>
+              <tr>
+                <th v-for="h in csvEditorHeaders" :key="h">{{ h }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, idx) in csvEditorRows" :key="idx">
+                <td v-for="h in csvEditorHeaders" :key="h + idx">
+                  <textarea v-if="isLongCol(h)" class="cell cell-area" v-model="row[h]" spellcheck="false"></textarea>
+                  <input v-else class="cell cell-input" v-model="row[h]" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" type="button" @click="closeCsvEditor">取消</button>
+          <button class="btn primary" type="button" :disabled="csvEditorSaving" @click="saveCsvEditor">{{ csvEditorSaving ? '保存中' : '保存' }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -700,6 +949,90 @@ const downloadCsvTpl = () => {
   justify-content: flex-start;
   align-items: center;
   gap: 8px;
+}
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.28);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+  z-index: 9999;
+}
+.modal {
+  width: min(980px, calc(100vw - 32px));
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+  padding: 14px 16px;
+  box-sizing: border-box;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  word-break: break-all;
+}
+.csv-table-wrap {
+  margin-top: 12px;
+  width: 100%;
+  max-height: min(560px, calc(100vh - 240px));
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.csv-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+.csv-table th,
+.csv-table td {
+  border: 1px solid #e2e8f0;
+  padding: 8px;
+  vertical-align: top;
+}
+.csv-table th {
+  position: sticky;
+  top: 0;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  z-index: 1;
+}
+.cell {
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.cell-input {
+  height: 28px;
+}
+.cell-area {
+  min-height: 64px;
+  resize: vertical;
+  display: block;
+}
+.modal-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 .btn.sm {
   height: 28px;

@@ -2,40 +2,50 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import Toast from './ui/Toast.vue'
 import questionIcon from '../assets/question-svgrepo-com.svg'
+import { apiFetch } from '../utils/api'
 
-const inferApiBase = () => {
-  const saved = localStorage.getItem('apiBase')
-  if (saved) return saved
-  const env = import.meta.env.VITE_API_BASE
-  if (env) return env
-  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
-    return `${window.location.protocol}//${window.location.hostname}:5000`
-  }
-  return 'http://127.0.0.1:5000'
-}
-
-const apiBase = ref(inferApiBase())
 const baseUrl = ref(localStorage.getItem('baseUrl') || '')
+const baseUrlOptions = ref([])
 const saving = ref(false)
 const saved = ref(false)
 const error = ref('')
+
+const loadBaseUrlOptions = () => {
+  let list = []
+  try {
+    const raw = localStorage.getItem('baseUrlOptions') || '[]'
+    const parsed = JSON.parse(raw)
+    list = Array.isArray(parsed) ? parsed : []
+  } catch (_) {
+    list = []
+  }
+  const cleaned = list
+    .map(x => String(x || '').trim())
+    .filter(Boolean)
+    .map(x => x.replace(/\/$/, ''))
+  const set = new Set(cleaned)
+  const cur = String(baseUrl.value || '').trim().replace(/\/$/, '')
+  if (cur) set.add(cur)
+  baseUrlOptions.value = Array.from(set)
+}
 
 const save = async () => {
   error.value = ''
   saved.value = false
   saving.value = true
   try {
-    localStorage.setItem('apiBase', apiBase.value || '')
-    localStorage.setItem('baseUrl', baseUrl.value || '')
+    const v = String(baseUrl.value || '').trim().replace(/\/$/, '')
+    baseUrl.value = v
+    localStorage.setItem('baseUrl', v)
+    loadBaseUrlOptions()
+    try {
+      localStorage.setItem('baseUrlOptions', JSON.stringify(baseUrlOptions.value || []))
+    } catch (_) {
+    }
     saved.value = true
   } finally {
     saving.value = false
   }
-}
-const openBase = () => {
-  const url = apiBase.value || ''
-  if (!url) return
-  window.open(url, '_blank')
 }
 
 const defaultModels = [
@@ -85,15 +95,7 @@ const authHeaders = () => {
   return { Authorization: `Bearer ${token}` }
 }
 
-const apiBaseUrl = computed(() => String(apiBase.value || '').replace(/\/$/, ''))
-const apiBaseCandidates = computed(() => {
-  const fromInput = apiBaseUrl.value
-  const inferred = typeof window !== 'undefined' && window.location && window.location.hostname
-    ? `${window.location.protocol}//${window.location.hostname}:5000`
-    : ''
-  const list = [fromInput, inferred, 'http://127.0.0.1:5000', 'http://localhost:5000'].filter(Boolean)
-  return Array.from(new Set(list))
-})
+const apiBaseUrl = computed(() => String(import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000').replace(/\/$/, ''))
 
 const persistModelsConfig = () => {
   localStorage.setItem(
@@ -196,26 +198,20 @@ const saveAiConfigToServer = async (opts = {}) => {
       }))
     }
 
-    for (const base of apiBaseCandidates.value) {
-      const res = await fetch(`${base}/api/ai/config`, {
+    const res = await apiFetch(`${apiBaseUrl.value}/api/ai/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...headers },
         body: JSON.stringify(payload)
       })
       if (res.status === 401) {
         if (toast) showToast('登录已失效，请重新登录', 'error')
-        break
+        return
       }
       if (res.ok) {
-        if (apiBaseUrl.value !== base) {
-          apiBase.value = base
-          localStorage.setItem('apiBase', base)
-        }
         if (toast) showToast('已保存到数据库', 'success')
         serverSnapshot.value = JSON.parse(JSON.stringify({ activeModelKey: activeModelKey.value || '', models: models.value || [] }))
-        break
+        return
       }
-    }
   } catch (e) {
   } finally {
     if (!silent) aiSaving.value = false
@@ -317,23 +313,13 @@ const loadFromServer = async () => {
   if (!headers) return
   try {
     let data = null
-    for (const base of apiBaseCandidates.value) {
-      const res = await fetch(`${base}/api/ai/config`, {
-        method: 'GET',
-        headers: { ...headers }
-      })
+    const res = await apiFetch(`${apiBaseUrl.value}/api/ai/config`, { method: 'GET', headers: { ...headers } })
       if (res.status === 401) {
         error.value = '登录已失效，请重新登录'
         return
       }
-      if (!res.ok) continue
+      if (!res.ok) return
       data = await res.json()
-      if (apiBaseUrl.value !== base) {
-        apiBase.value = base
-        localStorage.setItem('apiBase', base)
-      }
-      break
-    }
     if (!data) return
     const incoming = Array.isArray(data.models) ? data.models : []
     suppressSync.value = true
@@ -356,6 +342,7 @@ const loadFromServer = async () => {
 }
 
 onMounted(() => {
+  loadBaseUrlOptions()
   loadFromServer()
 })
 </script>
@@ -368,20 +355,17 @@ onMounted(() => {
       <!-- 基础设置 -->
       <div class="section-group">
         <div class="form-item">
-          <label class="label">后端服务地址</label>
-          <input class="input" v-model="apiBase" placeholder="例如: http://127.0.0.1:5000" />
-          <div class="tips">优先使用此处设置，其次使用环境变量VITE_API_BASE</div>
-        </div>
-        <div class="form-item">
           <div class="label-row">
             <label class="label">base_url</label>
             <img class="help-icon" :src="questionIcon" alt="帮助" title="生成用例时会拼接为完整请求URL：base_url + 请求URL" />
           </div>
-          <input class="input" v-model="baseUrl" placeholder="例如: http://127.0.0.1:5000" />
+          <input class="input" v-model="baseUrl" list="baseurl-options" placeholder="例如: http://127.0.0.1:5000" />
+          <datalist id="baseurl-options">
+            <option v-for="opt in baseUrlOptions" :key="opt" :value="opt">{{ opt }}</option>
+          </datalist>
         </div>
         <div class="btns">
           <button class="btn primary" :disabled="saving" @click="save">{{ saving ? '保存中' : '保存' }}</button>
-          <button class="btn" @click="openBase">打开</button>
         </div>
         <div class="ok" v-if="saved">已保存</div>
         <div class="err" v-if="error">{{ error }}</div>

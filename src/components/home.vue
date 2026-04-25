@@ -3,9 +3,9 @@
   <div class="home-container">
     <!-- 欢迎区 -->
     <section class="welcome-section">
-      <h1 class="welcome-title">欢迎使用接口自动化测试平台 V1.0.0</h1>
+      <h1 class="welcome-title">欢迎使用接口自动化测试平台</h1>
       <p class="welcome-desc">
-        本平台提供一站式的接口自动化测试解决方案，支持多环境配置、多种数据源、高性能并发执行、可视化报告等功能。
+        <!-- 本平台提供一站式的接口自动化测试解决方案，支持多环境配置、多种数据源、高性能并发执行、可视化报告等功能。 -->
       </p>
       <!-- 功能卡片 -->
       <div class="function-cards">
@@ -23,7 +23,7 @@
 
     <!-- 系统状态和操作指南 -->
     <section class="system-section">
-      <h2 class="section-title">系统状态</h2>
+      <!-- <h2 class="section-title">系统状态</h2> -->
       <div class="system-cards">
         <div class="system-card">
           <h3 class="card-subtitle">环境配置</h3>
@@ -103,26 +103,26 @@ const functionCards = [
 .welcome-section {
   background-color: #f5f8ff;
   color: #0f172a;
-  padding: 40px 20px;
+  padding: 22px 20px;
   text-align: center;
 }
 
 .welcome-title {
   font-size: 32px;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
   font-weight: bold;
 }
 
 .welcome-desc {
   font-size: 18px;
-  margin-bottom: 40px;
+  margin-bottom: 18px;
   line-height: 1.6;
 }
 
 .function-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 24px;
+  gap: 16px;
   padding: 0 20px;
   width: 100%;
   margin: 0 auto;
@@ -132,7 +132,7 @@ const functionCards = [
   background-color: #fff;
   color: #333;
   border-radius: 12px;
-  padding: 24px;
+  padding: 18px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   text-align: center;
 }
@@ -146,7 +146,7 @@ const functionCards = [
 .card-desc {
   font-size: 14px;
   color: #666;
-  margin-bottom: 24px;
+  margin-bottom: 14px;
   line-height: 1.5;
 }
 
@@ -167,7 +167,7 @@ const functionCards = [
 }
 
 .system-section {
-  padding: 40px 20px;
+  padding: 10px 20px 14px;
   background-color: #f5f8ff;
   color: #0f172a;
 }
@@ -182,9 +182,9 @@ const functionCards = [
 .system-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 24px;
+  gap: 16px;
   width: 100%;
-  margin: 0 auto 40px;
+  margin: 0 auto 18px;
 }
 
 .system-card {
@@ -218,7 +218,7 @@ const functionCards = [
   background-color: #f8f9fa;
   color: #333;
   border-radius: 12px;
-  padding: 32px;
+  padding: 18px;
   text-align: center;
   width: 100%;
   margin: 0 auto;
@@ -234,7 +234,7 @@ const functionCards = [
 .guide-desc {
   font-size: 16px;
   color: #666;
-  margin-bottom: 24px;
+  margin-bottom: 14px;
 }
 
 .guide-btn {
@@ -255,9 +255,9 @@ const functionCards = [
 
 .footer {
   text-align: center;
-  padding: 20px;
+  padding: 12px 0 0;
   color: #64748b;
   font-size: 14px;
-  margin-top: 40px;
+  margin-top: 14px;
 }
 </style>

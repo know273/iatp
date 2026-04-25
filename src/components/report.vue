@@ -3,10 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import Toast from './ui/Toast.vue'
 import Pagination from './ui/Pagination.vue'
-import IconButton from './ui/IconButton.vue'
-import checkIcon from '../assets/check.svg'
-import deleteIcon from '../assets/delete.svg'
-import downloadIcon from '../assets/download.svg'
+import { View, Delete } from '@element-plus/icons-vue'
 import { apiFetch } from '../utils/api'
 import { setHtmlReportCount } from '../stores/systemStats'
 
@@ -75,18 +72,6 @@ const openReport = async (item) => {
   }
 }
 
-const downloadCSV = (item) => {
-  const headers = ['报告名称', '大小', '生成时间']
-  const row = [item.reportName, item.size, item.createdAt]
-  const csv = `${headers.join(',')}\n${row.join(',')}\n`
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `${item.reportName.replace(/\.html$/,'')}.csv`
-  a.click()
-  URL.revokeObjectURL(a.href)
-}
-
 const loadReports = async () => {
   try {
     const res = await apiFetch(`${apiBase.value}/api/reports/report/files`)
@@ -134,39 +119,30 @@ const removeReport = async (idx) => {
     <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
     <div class="page-full-title">测试报告</div>
     <div class="page-subtitle">查看和管理测试报告</div>
-    <section class="card">
-      <div class="card-title">报告列表</div>
+    <el-card class="card" shadow="never">
+      <template #header>
+        <div class="card-title">报告列表</div>
+      </template>
       <div class="card-body">
-        <div class="table-container">
-          <table class="report-table">
-            <thead>
-              <tr>
-                <th>报告名称</th>
-                <th>大小</th>
-                <th>生成时间</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(item, idx) in pagedReports" :key="item.reportName">
-                <td>{{ item.reportName }}</td>
-                <td>{{ item.size }}</td>
-                <td>{{ item.createdAt }}</td>
-                <td class="operation">
-                  <IconButton :src="checkIcon" title="查看" :size="16" :button-size="32" @click="openReport(item)" />
-                  <IconButton :src="downloadIcon" title="下载csv" :size="16" :button-size="32" @click="downloadCSV(item)" />
-                  <IconButton :src="deleteIcon" title="删除" :size="16" :button-size="32" @click="removeReport(idx)" />
-                </td>
-              </tr>
-              <tr v-if="!reports.length">
-                <td colspan="4" class="empty">暂无报告</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <el-table :data="pagedReports" style="width: 100%">
+          <el-table-column prop="reportName" label="报告名称" min-width="320" show-overflow-tooltip />
+          <el-table-column prop="size" label="大小" width="110" />
+          <el-table-column prop="createdAt" label="生成时间" width="180" />
+          <el-table-column label="操作" width="180">
+            <template #default="{ row, $index }">
+              <div class="operation">
+                <el-button circle :icon="View" @click="openReport(row)" />
+                <el-button circle type="danger" :icon="Delete" @click="removeReport($index)" />
+              </div>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <div class="empty">暂无报告</div>
+          </template>
+        </el-table>
         <Pagination v-model="currentPage" :total="totalItems" :page-size="pageSize" />
       </div>
-    </section>
+    </el-card>
   </div>
 </template>
 
@@ -207,12 +183,18 @@ const removeReport = async (idx) => {
 .card-title {
   font-size: 16px;
   font-weight: 600;
-  padding: 14px 16px;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 0;
+  color: #2DB36A;
   text-align: left;
 }
 .card-body {
-  padding: 16px;
+  padding: 0;
+}
+.card :deep(.el-card__header) {
+  padding: 6px 8px;
+}
+.card :deep(.el-card__body) {
+  padding: 6px 8px;
 }
 .table-container {
   width: 100%;

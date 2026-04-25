@@ -9,7 +9,6 @@ const router = useRouter()
 
 const username = ref('')
 const password = ref('')
-const isPwdVisible = ref(false)
 const loginErrors = ref({ username: '', password: '' })
 const toastShow = ref(false)
 const toastMsg = ref('')
@@ -24,12 +23,24 @@ const showToast = (msg, type = 'info') => {
 const regUsername = ref('')
 const regPassword = ref('')
 const regPassword2 = ref('')
-const isRegPwdVisible = ref(false)
-const isRegPwd2Visible = ref(false)
 const regErrors = ref({ username: '', password: '', password2: '' })
 
 const base = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000'
 const activeCard = ref('login')
+
+// 登录/注册切换按钮点击时，统一清空两侧表单的残留错误提示
+const resetErrorBag = (bagRef) => {
+  const bag = bagRef.value || {}
+  const next = {}
+  for (const key of Object.keys(bag)) next[key] = ''
+  bagRef.value = next
+}
+
+const switchAuthCard = (card) => {
+  resetErrorBag(loginErrors)
+  resetErrorBag(regErrors)
+  activeCard.value = card
+}
 
 const handleLogin = async () => {
   loginErrors.value = { username: '', password: '' }
@@ -45,6 +56,10 @@ const handleLogin = async () => {
       skipAuth: true
     })
     if (!res.ok) {
+      if (res.status === 401) {
+        showToast('用户名或密码错误!', 'error')
+        return
+      }
       const text = await res.text()
       showToast(text || '登录失败', 'error')
       return
@@ -55,7 +70,7 @@ const handleLogin = async () => {
       setRefreshToken(data.refresh_token || '')
       localStorage.setItem('username', username.value)
       showToast('登录成功', 'success')
-      setTimeout(() => router.push('/main'), 250)
+      setTimeout(() => router.push('/main'), 2500)
     } else {
       showToast('登录响应异常', 'error')
     }
@@ -75,6 +90,17 @@ const handleRegister = async () => {
   if (!p2) regErrors.value.password2 = '请再次输入密码'
   if (regErrors.value.username || regErrors.value.password || regErrors.value.password2) return
 
+  const unOk = /^[A-Za-z0-9_]+$/.test(u)
+  if (!unOk) {
+    regErrors.value.username = '用户名仅支持英文、数字、下划线'
+    return
+  }
+  const pwOk = /^[A-Za-z0-9_]+$/.test(p1) && p1.length >= 6
+  if (!pwOk) {
+    regErrors.value.password = '密码需≥6位，且仅支持英文、数字、下划线'
+    return
+  }
+
   if (p1 !== p2) {
     regErrors.value.password2 = '两次输入的密码不一致'
     return
@@ -89,8 +115,21 @@ const handleRegister = async () => {
     })
 
     if (!res.ok) {
-      const text = await res.text()
-      showToast(text || '注册失败', 'error')
+      if (res.status === 409) {
+        showToast('用户名已存在!', 'error')
+        return
+      }
+      const text = (await res.text()) || ''
+      const t = text.toLowerCase()
+      if (t.includes('missing params')) {
+        showToast('请输入完整信息!', 'error')
+        return
+      }
+      if (t.includes('username already exists')) {
+        showToast('用户名已存在!', 'error')
+        return
+      }
+      showToast('注册失败', 'error')
       return
     }
 
@@ -114,53 +153,35 @@ const handleRegister = async () => {
       <div class="auth-card login-card">
         <div class="card-header">
           <h1 class="card-title">欢迎登录</h1>
-          <div class="card-subtitle">智能接口测试平台</div>
+          <div class="card-subtitle">接口自动化测试平台</div>
         </div>
 
-        <div class="form-item">
-          <label class="form-label">用户名</label>
-          <input
-            type="text"
-            v-model="username"
-            class="form-input"
-            :class="{ 'is-error': !!loginErrors.username }"
-            placeholder="请输入用户名"
-            @input="loginErrors.username = ''"
-          />
-          <div v-if="loginErrors.username" class="field-error">{{ loginErrors.username }}</div>
-        </div>
+        <el-form label-position="top" class="auth-form" @submit.prevent>
+          <el-form-item label="用户名" :error="loginErrors.username">
+            <el-input v-model="username" placeholder="请输入用户名" clearable @input="loginErrors.username = ''" />
+          </el-form-item>
 
-        <div class="form-item">
-          <label class="form-label">密码</label>
-          <div class="pwd-input-wrapper">
-            <input
-              :type="isPwdVisible ? 'text' : 'password'"
+          <el-form-item label="密码" :error="loginErrors.password">
+            <el-input
               v-model="password"
-              class="form-input pwd-input"
-              :class="{ 'is-error': !!loginErrors.password }"
+              type="password"
+              show-password
               placeholder="请输入密码"
               @input="loginErrors.password = ''"
             />
-            <span
-              class="pwd-eye"
-              @click="isPwdVisible = !isPwdVisible"
-              :title="isPwdVisible ? '隐藏密码' : '显示密码'"
-            >
-              <i :class="isPwdVisible ? 'icon-eye-open' : 'icon-eye-close'"></i>
-            </span>
-          </div>
-          <div v-if="loginErrors.password" class="field-error">{{ loginErrors.password }}</div>
-        </div>
+          </el-form-item>
 
-        <button type="button" class="primary-btn" @click="handleLogin">登录</button>
+          <el-button type="primary" class="primary-btn" @click="handleLogin">登录</el-button>
+        </el-form>
 
         <div class="hint-row">
-          <span class="hint-text">测试账号：6 / 6 可直通</span>
+          <span class="hint-text"></span>
+          <!-- 测试账号：6 / 6 可直通 -->
         </div>
 
         <div class="switch-row">
           <span class="switch-text">还没有账号？</span>
-          <button type="button" class="switch-action" @click="activeCard = 'register'">立即注册</button>
+          <button type="button" class="switch-action" @click="switchAuthCard('register')">立即注册</button>
         </div>
       </div>
 
@@ -170,68 +191,37 @@ const handleRegister = async () => {
           <div class="card-subtitle">首次使用请先注册</div>
         </div>
 
-        <div class="form-item">
-          <label class="form-label">用户名</label>
-          <input
-            type="text"
-            v-model="regUsername"
-            class="form-input"
-            :class="{ 'is-error': !!regErrors.username }"
-            placeholder="请输入用户名"
-            @input="regErrors.username = ''"
-          />
-          <div v-if="regErrors.username" class="field-error">{{ regErrors.username }}</div>
-        </div>
+        <el-form label-position="top" class="auth-form" @submit.prevent>
+          <el-form-item label="用户名" :error="regErrors.username">
+            <el-input v-model="regUsername" placeholder="请输入用户名" clearable @input="regErrors.username = ''" />
+          </el-form-item>
 
-        <div class="form-item">
-          <label class="form-label">密码</label>
-          <div class="pwd-input-wrapper">
-            <input
-              :type="isRegPwdVisible ? 'text' : 'password'"
+          <el-form-item label="密码" :error="regErrors.password">
+            <el-input
               v-model="regPassword"
-              class="form-input pwd-input"
-              :class="{ 'is-error': !!regErrors.password }"
+              type="password"
+              show-password
               placeholder="请输入密码"
               @input="regErrors.password = ''"
             />
-            <span
-              class="pwd-eye"
-              @click="isRegPwdVisible = !isRegPwdVisible"
-              :title="isRegPwdVisible ? '隐藏密码' : '显示密码'"
-            >
-              <i :class="isRegPwdVisible ? 'icon-eye-open' : 'icon-eye-close'"></i>
-            </span>
-          </div>
-          <div v-if="regErrors.password" class="field-error">{{ regErrors.password }}</div>
-        </div>
+          </el-form-item>
 
-        <div class="form-item">
-          <label class="form-label">确认密码</label>
-          <div class="pwd-input-wrapper">
-            <input
-              :type="isRegPwd2Visible ? 'text' : 'password'"
+          <el-form-item label="确认密码" :error="regErrors.password2">
+            <el-input
               v-model="regPassword2"
-              class="form-input pwd-input"
-              :class="{ 'is-error': !!regErrors.password2 }"
+              type="password"
+              show-password
               placeholder="请再次输入密码"
               @input="regErrors.password2 = ''"
             />
-            <span
-              class="pwd-eye"
-              @click="isRegPwd2Visible = !isRegPwd2Visible"
-              :title="isRegPwd2Visible ? '隐藏密码' : '显示密码'"
-            >
-              <i :class="isRegPwd2Visible ? 'icon-eye-open' : 'icon-eye-close'"></i>
-            </span>
-          </div>
-          <div v-if="regErrors.password2" class="field-error">{{ regErrors.password2 }}</div>
-        </div>
+          </el-form-item>
 
-        <button type="button" class="secondary-btn" @click="handleRegister">注册</button>
+          <el-button type="primary" class="secondary-btn" @click="handleRegister">注册</el-button>
+        </el-form>
 
         <div class="switch-row">
           <span class="switch-text">已有账号？</span>
-          <button type="button" class="switch-action" @click="activeCard = 'login'">立即登录</button>
+          <button type="button" class="switch-action" @click="switchAuthCard('login')">立即登录</button>
         </div>
       </div>
     </div>
@@ -362,53 +352,18 @@ const handleRegister = async () => {
   color: #ff4d4f;
 }
 
-.pwd-input-wrapper {
-  position: relative;
-}
-.pwd-input {
-  padding-right: 40px; /* 给眼睛图标留空间 */
-}
-.pwd-eye {
-  position: absolute;
-  right: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 18px;
-  color: rgba(15, 23, 42, 0.55);
-  cursor: pointer;
-  user-select: none;
-}
-.pwd-eye:hover {
-  color: #1e50c8;
-}
-
-.icon-eye-open:before {
-    content: '';
-    display: inline-block;
-    width: 18px;
-    height: 18px;
-    background: url("../assets/icon-eye-open.png") no-repeat center;
-    background-size: cover;
-    vertical-align: middle;
-    cursor: pointer;
-}
-
-.icon-eye-close:before {
-    content: '';
-    display: inline-block;
-    width: 18px;
-    height: 18px;
-    background: url("../assets/icon-eye-close.png") no-repeat center;
-    background-size: cover;
-    vertical-align: middle;
-    cursor: pointer;
-}
+ :deep(.el-form-item__label) {
+  font-size: 14px;
+  color: rgba(15, 23, 42, 0.75);
+ }
+ :deep(.el-input__wrapper) {
+  border-radius: 10px;
+ }
 
 .primary-btn,
 .secondary-btn {
   width: 100%;
   height: 44px;
-  border: none;
   border-radius: 12px;
   font-size: 16px;
   font-weight: 600;
@@ -416,12 +371,20 @@ const handleRegister = async () => {
   transition: opacity 0.2s;
 }
 .primary-btn {
-  background: linear-gradient(90deg, #1e50c8 0%, #3a78f4 100%);
-  color: #fff;
+  --el-button-bg-color: #1e50c8;
+  --el-button-border-color: #1e50c8;
+  --el-button-hover-bg-color: #3a78f4;
+  --el-button-hover-border-color: #3a78f4;
+  --el-button-active-bg-color: #1e50c8;
+  --el-button-active-border-color: #1e50c8;
 }
 .secondary-btn {
-  background: linear-gradient(90deg, #7c3aed 0%, #a855f7 100%);
-  color: #fff;
+  --el-button-bg-color: #7c3aed;
+  --el-button-border-color: #7c3aed;
+  --el-button-hover-bg-color: #a855f7;
+  --el-button-hover-border-color: #a855f7;
+  --el-button-active-bg-color: #7c3aed;
+  --el-button-active-border-color: #7c3aed;
 }
 .primary-btn:hover,
 .secondary-btn:hover {

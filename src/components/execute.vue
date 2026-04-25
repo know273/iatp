@@ -3,10 +3,9 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Toast from './ui/Toast.vue'
 import Pagination from './ui/Pagination.vue'
-import IconButton from './ui/IconButton.vue'
 import TaskCard from './ui/TaskCard.vue'
-import checkIcon from '../assets/check.svg'
-import deleteIcon from '../assets/delete.svg'
+import { View, Delete } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
 import { apiFetch } from '../utils/api'
 
 const apiBase = computed(() => import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000')
@@ -123,7 +122,16 @@ const startRun = async () => {
   }
 }
 
-const clearHistory = () => {
+const clearHistory = async () => {
+  try {
+    await ElMessageBox.confirm('确认清空历史执行记录吗？（测试报告会一起清空）', '提示', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch (_) {
+    return
+  }
   history.value = []
   currentPage.value = 1
 }
@@ -205,37 +213,40 @@ onMounted(() => {
   <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
   <div class="exec-page">
     <div class="exec-header">执行测试</div>
-    <section class="card">
-      <div class="card-title">执行配置</div>
+    <el-card class="card" shadow="never">
+      <template #header>
+        <div class="card-title">执行配置</div>
+      </template>
       <div class="card-body">
-        <div class="form-item">
-          <label class="label">测试用例文件</label>
-          <select class="select" v-model="selectedFile">
-            <option value="">选择文件</option>
-            <option v-for="f in files" :key="f" :value="f">{{ f }}</option>
-          </select>
-        </div>
-        <div class="form-item">
-          <label class="label">环境</label>
-          <select class="select" v-model="env">
-            <option value="test">test</option>
-            <option value="dev">dev</option>
-            <option value="prod">prod</option>
-          </select>
-        </div>
-        <div class="form-item">
-          <label class="label">base_url（来自配置管理）</label>
-          <input class="input" :value="baseUrl" disabled />
-          <div class="tips">用于拼接完整接口：base_url + 请求URL</div>
-        </div>
-        <div>
-          <button class="btn primary" @click="startRun">开始执行</button>
-        </div>
+        <el-form label-position="top">
+          <el-form-item label="测试用例文件">
+            <el-select v-model="selectedFile" placeholder="选择文件" style="width: 280px; max-width: 100%">
+              <el-option label="选择文件" value="" />
+              <el-option v-for="f in files" :key="f" :label="f" :value="f" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="执行环境">
+            <el-select v-model="env" style="width: 280px; max-width: 100%">
+              <el-option label="测试环境" value="test" />
+              <el-option label="预发布环境" value="dev" />
+              <el-option label="生产环境" value="prod" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Base URL(来自配置管理)">
+            <div class="base-url-wrap">
+              <el-input :model-value="baseUrl" disabled style="width: 520px; max-width: 100%" />
+              <div class="tips">用于拼接完整接口: Base URL(基础URL) + URL参数</div>
+            </div>
+          </el-form-item>
+          <el-button type="primary" :disabled="running" :loading="running" @click="startRun">开始执行</el-button>
+        </el-form>
       </div>
-    </section>
+    </el-card>
 
-    <section class="card">
-      <div class="card-title">执行状态</div>
+    <el-card class="card" shadow="never">
+      <template #header>
+        <div class="card-title">执行状态</div>
+      </template>
       <div class="card-body">
         <TaskCard
           v-if="taskId"
@@ -250,52 +261,39 @@ onMounted(() => {
         </TaskCard>
         <div v-else-if="running" class="status info">执行中... 请稍候</div>
         <div v-else-if="success" class="status ok">执行成功！测试执行完成！</div>
+        <div v-else class="empty">暂无执行任务</div>
       </div>
-    </section>
+    </el-card>
 
-    <section class="card">
-      <div class="card-title">历史执行记录</div>
+    <el-card class="card" shadow="never">
+      <template #header>
+        <div class="card-title">历史执行记录</div>
+      </template>
       <div class="card-body">
         <div class="history-toolbar">
-          <button class="btn danger" @click="clearHistory">清空记录（测试报告会一起清空）</button>
+          <el-button type="danger" @click="clearHistory">清空记录（测试报告会一起清空）</el-button>
         </div>
-        <div class="table-container">
-          <table class="history-table">
-            <thead>
-              <tr>
-                <th>执行时间</th>
-                <th>测试文件</th>
-                <th>报告名称</th>
-                <th>用例数量</th>
-                <th>通过数</th>
-                <th>失败数</th>
-                <th>通过率</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in pagedHistory" :key="item.executedAt + item.reportName">
-                <td>{{ item.executedAt }}</td>
-                <td>{{ item.fileName }}</td>
-                <td>{{ item.reportName }}</td>
-                <td>{{ item.total }}</td>
-                <td>{{ item.passed }}</td>
-                <td>{{ item.failed }}</td>
-                <td>{{ item.passRate }}</td>
-                <td class="operation">
-                  <IconButton :src="checkIcon" title="查看报告" :size="18" :button-size="36" @click="viewReport(item)" />
-                  <IconButton :src="deleteIcon" title="删除" :size="18" :button-size="36" @click="deleteHistoryReport(item)" />
-                </td>
-              </tr>
-              <tr v-if="!history.length">
-                <td colspan="8" class="empty">暂无历史记录</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <el-table :data="pagedHistory" style="width: 100%">
+          <el-table-column prop="executedAt" label="执行时间" width="180" />
+          <el-table-column prop="fileName" label="测试文件" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="reportName" label="报告名称" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="total" label="用例数量" width="100" />
+          <el-table-column prop="passed" label="通过数" width="90" />
+          <el-table-column prop="failed" label="失败数" width="90" />
+          <el-table-column prop="passRate" label="通过率" width="90" />
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button circle :icon="View" @click="viewReport(row)" />
+              <el-button circle type="danger" :icon="Delete" @click="deleteHistoryReport(row)" />
+            </template>
+          </el-table-column>
+          <template #empty>
+            <div class="empty">暂无历史记录</div>
+          </template>
+        </el-table>
         <Pagination v-model="currentPage" :total="totalItems" :page-size="pageSize" />
       </div>
-    </section>
+    </el-card>
   </div>
 </template>
 
@@ -323,14 +321,20 @@ onMounted(() => {
 .card-title {
   font-size: 16px;
   font-weight: 600;
-  padding: 14px 16px;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 0;
+  color: #2DB36A;
 }
 .card-body {
-  padding: 16px;
+  padding: 0;
 }
 .card, .card-title, .card-body, .form-item, .tips, .status, .exec-header {
   text-align: left;
+}
+.card :deep(.el-card__header) {
+  padding: 6px 8px;
+}
+.card :deep(.el-card__body) {
+  padding: 6px 8px;
 }
 .form-item {
   margin-bottom: 12px;
@@ -353,6 +357,12 @@ onMounted(() => {
   color: #999;
   font-size: 12px;
   margin-top: 6px;
+}
+.base-url-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
 }
 .btn {
   height: 36px;

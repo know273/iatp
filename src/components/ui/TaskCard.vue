@@ -5,7 +5,8 @@ const props = defineProps({
   title: { type: String, default: '' },
   status: { type: String, default: '' },
   progress: { type: Number, default: 0 },
-  subtitle: { type: String, default: '' }
+  subtitle: { type: String, default: '' },
+  showProgress: { type: Boolean, default: true }
 })
 
 const badge = computed(() => {
@@ -18,7 +19,7 @@ const badge = computed(() => {
 })
 
 const pct = computed(() => Math.max(0, Math.min(100, Number(props.progress) || 0)))
-const showBar = computed(() => badge.value.cls === 'info' || badge.value.cls === 'muted')
+const showBar = computed(() => props.showProgress && (badge.value.cls === 'info' || badge.value.cls === 'muted'))
 </script>
 
 <template>

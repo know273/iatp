@@ -4,7 +4,7 @@
     <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
     <!-- 顶部导航栏 -->
     <header class="header">
-      <div class="header-title">接口自动化测试平台 V1.0.0</div>
+      <div class="header-title">接口自动化测试平台</div>
       <div class="header-user">
         <span>{{ currentUser }}</span>
         <button class="logout-btn" @click="handleLogout">退出</button>

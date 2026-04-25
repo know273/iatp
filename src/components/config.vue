@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import Toast from './ui/Toast.vue'
 import questionIcon from '../assets/question-svgrepo-com.svg'
 import { apiFetch } from '../utils/api'
+import { Delete, ArrowRight, Plus } from '@element-plus/icons-vue'
 
 const baseUrl = ref(localStorage.getItem('baseUrl') || '')
 const baseUrlOptions = ref([])
@@ -356,16 +357,25 @@ onMounted(() => {
       <div class="section-group">
         <div class="form-item">
           <div class="label-row">
-            <label class="label">base_url</label>
-            <img class="help-icon" :src="questionIcon" alt="帮助" title="生成用例时会拼接为完整请求URL：base_url + 请求URL" />
+            <label class="label">Base URL(基础URL)</label>
+            <el-tooltip content="生成用例时会拼接为完整请求URL：Base URL(基础URL) + URL参数" placement="top">
+              <img class="help-icon" :src="questionIcon" alt="帮助" />
+            </el-tooltip>
           </div>
-          <input class="input" v-model="baseUrl" list="baseurl-options" placeholder="例如: http://127.0.0.1:5000" />
-          <datalist id="baseurl-options">
-            <option v-for="opt in baseUrlOptions" :key="opt" :value="opt">{{ opt }}</option>
-          </datalist>
+          <el-select
+            v-model="baseUrl"
+            filterable
+            clearable
+            allow-create
+            default-first-option
+            placeholder="例如: http://127.0.0.1:5000"
+            style="width: 520px; max-width: 100%"
+          >
+            <el-option v-for="opt in baseUrlOptions" :key="opt" :label="opt" :value="opt" />
+          </el-select>
         </div>
         <div class="btns">
-          <button class="btn primary" :disabled="saving" @click="save">{{ saving ? '保存中' : '保存' }}</button>
+          <el-button type="primary" :loading="saving" :disabled="saving" @click="save">保存</el-button>
         </div>
         <div class="ok" v-if="saved">已保存</div>
         <div class="err" v-if="error">{{ error }}</div>
@@ -375,75 +385,71 @@ onMounted(() => {
       <div class="section-group ai-section">
         <div class="section-title">AI 功能</div>
         
-        <div class="ai-card">
+        <el-card class="ai-card" shadow="never">
           <div class="card-header card-header-row">
             <span>模型列表</span>
             <div class="default-model" v-if="models.length">
               <span class="default-label">启用模型</span>
-              <select class="default-select" v-model="activeModelKey" @change="scheduleActiveSave">
-                <option value="">暂未选择</option>
-                <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name || m.tag || m.id }}</option>
-              </select>
+              <el-select
+                v-model="activeModelKey"
+                clearable
+                placeholder="暂未选择"
+                style="width: 240px"
+                @change="scheduleActiveSave"
+              >
+                <el-option v-for="m in models" :key="m.id" :label="m.name || m.tag || m.id" :value="m.id" />
+              </el-select>
             </div>
           </div>
           <div class="model-list">
             <div v-for="m in models" :key="m.id" class="model-row">
               <div class="model-item">
                 <div class="model-left">
-                  <label class="switch sm">
-                    <input type="checkbox" :checked="activeModelKey === m.id" @change="() => { activeModelKey = m.id; scheduleActiveSave() }">
-                    <span class="slider round"></span>
-                  </label>
+                  <el-switch
+                    size="small"
+                    :model-value="activeModelKey === m.id"
+                    @change="(v) => { activeModelKey = v ? m.id : ''; scheduleActiveSave() }"
+                  />
                   <span class="model-name">{{ m.name || '未命名模型' }}</span>
                   <span v-if="m.tag" class="model-tag">{{ m.tag }}</span>
                 </div>
                 <div class="model-right">
-                  <button class="icon-btn" @click.stop="removeModel(m)" type="button" aria-label="删除模型">×</button>
-                  <span class="chevron" :class="{ open: openModelId === m.id }" @click.stop="toggleModel(m)">›</span>
+                  <el-button link type="danger" :icon="Delete" @click.stop="removeModel(m)" />
+                  <el-button link :icon="ArrowRight" :class="['chevron-btn', { open: openModelId === m.id }]" @click.stop="toggleModel(m)" />
                 </div>
               </div>
               <div v-if="openModelId === m.id" class="model-expand">
                 <div class="form-item">
                   <label class="label">模型名称</label>
-                  <input class="input" v-model="editDraft.name" placeholder="输入模型名称" />
+                  <el-input v-model="editDraft.name" placeholder="输入模型名称" />
                 </div>
                 <div class="form-item">
                   <label class="label">模型 ID</label>
-                  <input class="input" v-model="editDraft.tag" placeholder="输入模型 ID" />
+                  <el-input v-model="editDraft.tag" placeholder="输入模型 ID" />
                 </div>
                 <div class="form-item">
                   <div class="label-row">
                     <label class="label">API Key</label>
                     <a class="label-link" href="https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
                   </div>
-                  <input
-                    class="input"
-                    autocomplete="new-password"
-                    :value="apiKeyFocused ? editDraft.apiKey : maskApiKey(editDraft.apiKey)"
-                    @focus="apiKeyFocused = true"
-                    @blur="apiKeyFocused = false"
-                    @input="(e) => (editDraft.apiKey = e.target.value)"
-                    placeholder="请输入 API Key"
-                  />
+                  <el-input v-model="editDraft.apiKey" type="password" show-password autocomplete="new-password" placeholder="请输入 API Key" />
                 </div>
                 <div class="form-item">
                   <label class="label">API 前置 URL</label>
-                  <input class="input" v-model="editDraft.endpoint" placeholder="请输入 API 前置 URL" />
+                  <el-input v-model="editDraft.endpoint" placeholder="请输入 API 前置 URL" />
                 </div>
 
                 <div class="edit-actions">
-                  <button class="btn primary" type="button" :disabled="aiSaving" @click="saveEditor">{{ aiSaving ? '保存中' : '保存' }}</button>
-                  <button class="btn" type="button" :disabled="aiSaving" @click="cancelEditor">取消</button>
-                  <button class="btn" type="button" :disabled="aiSaving || !serverSnapshot" @click="revertAiConfig">撤销全部修改</button>
+                  <el-button type="primary" :loading="aiSaving" :disabled="aiSaving" @click="saveEditor">保存</el-button>
+                  <el-button :disabled="aiSaving" @click="cancelEditor">取消</el-button>
+                  <el-button :disabled="aiSaving || !serverSnapshot" @click="revertAiConfig">撤销全部修改</el-button>
                 </div>
               </div>
             </div>
 
-            <button class="add-model-btn" type="button" @click="addModel">
-              <span class="plus">+</span> 添加模型
-            </button>
+            <el-button class="add-model-btn" type="primary" plain :icon="Plus" @click="addModel">添加模型</el-button>
           </div>
-        </div>
+        </el-card>
       </div>
     </div>
   </div>
@@ -701,25 +707,21 @@ onMounted(() => {
   border-color: #e2e8f0;
   color: #64748b;
 }
-.chevron {
+.chevron-btn {
   width: 28px;
   height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  padding: 0;
   border-radius: 8px;
-  font-size: 18px;
   color: #94a3b8;
-  font-weight: 300;
-  cursor: pointer;
-  user-select: none;
-  transition: transform 0.2s, background 0.2s, color 0.2s;
 }
-.chevron:hover {
+.chevron-btn:hover {
   background: #f8fafc;
   color: #64748b;
 }
-.chevron.open {
+.chevron-btn :deep(.el-icon) {
+  transition: transform 0.2s;
+}
+.chevron-btn.open :deep(.el-icon) {
   transform: rotate(90deg);
 }
 .model-expand {
@@ -740,21 +742,7 @@ onMounted(() => {
   background: transparent;
 }
 .add-model-btn {
-  display: flex;
-  width: fit-content;
-  padding: 6px 12px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  color: #475569;
-  font-size: 13px;
-  cursor: pointer;
   margin-top: 8px;
-  transition: all 0.2s;
-}
-.add-model-btn:hover {
-  background: #f8fafc;
-  border-color: #cbd5e1;
 }
 .switch.sm {
   width: 36px;

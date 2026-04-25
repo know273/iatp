@@ -3,24 +3,19 @@ import { ref, computed, onMounted, watch } from 'vue'
 import CollapseCard from './ui/CollapseCard.vue'
 import Pagination from './ui/Pagination.vue'
 import Toast from './ui/Toast.vue'
-import IconButton from './ui/IconButton.vue'
 import TaskCard from './ui/TaskCard.vue'
-import caretBottom from '../assets/caret-bottom-svgrepo-com.svg'
+import Modal from './ui/Modal.vue'
 import bookOpen from '../assets/book-open-svgrepo-com.svg'
-import circleCross from '../assets/circle-cross-svgrepo-com.svg'
-import deleteIcon from '../assets/delete.svg'
-import downloadIcon from '../assets/download.svg'
-import checkIcon from '../assets/check.svg'
+import { Delete, Download, Edit, Upload } from '@element-plus/icons-vue'
 import { apiFetch } from '../utils/api'
 import { setCsvCount } from '../stores/systemStats'
 
 const apiFile = ref(null)
-const apiFileInput = ref(null)
+const apiUploadRef = ref(null)
 const outputName = ref('autointerface_test_cases')
 const genOpen = ref(true)
 const uploadOpen = ref(true)
 const filesOpen = ref(true)
-const tplOpen = ref(true)
 const generating = ref(false)
 const genTaskId = ref('')
 const genTaskStatus = ref('')
@@ -31,31 +26,31 @@ const genError = ref('')
 const aiReply = ref('')
 const apiBase = computed(() => import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000')
 
-const onPickFile = (e) => {
-  const f = e.target.files && e.target.files[0]
-  apiFile.value = f || null
-}
 const clearApiFile = () => {
   apiFile.value = null
-  if (apiFileInput.value) apiFileInput.value.value = ''
+  if (apiUploadRef.value) apiUploadRef.value.clearFiles()
 }
 const upFile = ref(null)
-const upFileInput = ref(null)
-const onPickUpload = (e) => {
-  const f = e.target.files && e.target.files[0]
-  upFile.value = f || null
-}
+const upUploadRef = ref(null)
 const clearUpFile = () => {
   upFile.value = null
-  if (upFileInput.value) upFileInput.value.value = ''
+  if (upUploadRef.value) upUploadRef.value.clearFiles()
+}
+const onApiFileChange = (file) => {
+  apiFile.value = file && file.raw ? file.raw : null
+}
+const onApiFileRemove = () => {
+  clearApiFile()
+}
+const onUpFileChange = (file) => {
+  upFile.value = file && file.raw ? file.raw : null
+}
+const onUpFileRemove = () => {
+  clearUpFile()
 }
 const toAbsUrl = (base, rel) => {
   const p = String(rel || '').replace(/^\\+|^\/+/, '').replace(/\\/g, '/')
   return base.replace(/\/$/, '') + '/' + p
-}
-const baseName = (p) => {
-  const segs = String(p).split(/[\\\/]/)
-  return segs[segs.length - 1] || p
 }
 const genFromApiDoc = async () => {
   //为“输出文件名”添加了校验逻辑。
@@ -153,19 +148,6 @@ const viewFullAiReply = async () => {
     toastShow.value = true
   }
 }
-const toggleGen = () => {
-  genOpen.value = !genOpen.value
-}
-const toggleUpload = () => {
-  uploadOpen.value = !uploadOpen.value
-}
-const toggleFiles = () => {
-  filesOpen.value = !filesOpen.value
-}
-const toggleTpl = () => {
-  tplOpen.value = !tplOpen.value
-}
-
 const uploadedFiles = ref([])
 const fileType = (name) => {
   const n = String(name || '').toLowerCase()
@@ -176,6 +158,10 @@ const fileType = (name) => {
   return ''
 }
 const isCsv = (name) => String(name || '').toLowerCase().endsWith('.csv')
+const isTxt = (name) => {
+  const n = String(name || '').toLowerCase()
+  return n.endsWith('.ai.txt') || n.endsWith('.txt')
+}
 
 const csvCache = new Map()
 const csvEditorOpen = ref(false)
@@ -371,36 +357,6 @@ onMounted(loadFiles)
 watch(uploadedFiles, () => {
   if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
 })
-const downloadFile = async (f) => {
-  if (!f) return
-  const name = f.name || ''
-  if (!name) return
-  const token = localStorage.getItem('token') || ''
-  const refreshToken = localStorage.getItem('refresh_token') || ''
-  if ((!token || token.split('.').length !== 3) && (!refreshToken || refreshToken.split('.').length !== 3)) {
-    toastType.value = 'error'
-    toastMsg.value = '请先登录'
-    toastShow.value = true
-    return
-  }
-  try {
-    const res = await apiFetch(`${apiBase.value}/api/cases/download-signed-url?file_name=${encodeURIComponent(name)}`)
-    if (!res.ok) throw new Error(await res.text())
-    const data = await res.json()
-    if (!data || !data.url) throw new Error('missing url')
-    window.open(toAbsUrl(apiBase.value, data.url), '_blank')
-  } catch (_) {
-    toastType.value = 'error'
-    toastMsg.value = '下载失败'
-    toastShow.value = true
-  }
-}
-const downloadGenerated = () => {
-  const r = genResult.value || null
-  const fname = r && r.file_name ? String(r.file_name) : ''
-  if (!fname) return
-  downloadFile({ name: fname })
-}
 const deleteFile = (f) => {
   if (!f) return
   const name = f.name || ''
@@ -454,55 +410,24 @@ const uploadCase = async () => {
     uploading.value = false
   }
 }
+const downloadFile = async (f) => {
+  if (!f) return
+  const name = f.name || ''
+  if (!name) return
+  try {
+    const res = await apiFetch(`${apiBase.value}/api/cases/download-signed-url?file_name=${encodeURIComponent(name)}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    if (!data || !data.url) throw new Error('missing url')
+    window.open(toAbsUrl(apiBase.value, data.url), '_blank')
+  } catch (_) {
+    toastType.value = 'error'
+    toastMsg.value = '下载失败'
+    toastShow.value = true
+  }
+}
 
-const columns = ref([
-  { name: '接口名称', required: true, desc: '接口名称', example: '' },
-  { name: '用例描述', required: false, desc: '用例描述', example: '' },
-  { name: '执行阶段', required: false, desc: '执行阶段', example: '' },
-  { name: '操作步骤', required: false, desc: '操作步骤', example: '' },
-  { name: '预期结果', required: false, desc: '预期结果', example: '' },
-  { name: '优先级', required: false, desc: '优先级', example: '' },
-  { name: '标签', required: false, desc: '标签', example: '' },
-  { name: '请求方法', required: true, desc: '请求方法', example: '' },
-  { name: '请求URL', required: true, desc: '请求URL', example: '' },
-  { name: '请求头', required: false, desc: '请求头', example: '' },
-  { name: '请求参数', required: false, desc: '请求参数', example: '' },
-  { name: '请求体', required: false, desc: '请求体', example: '' },
-  { name: '预期状态码', required: false, desc: '预期状态码', example: '' },
-  { name: '预期响应', required: false, desc: '预期响应', example: '' },
-  { name: '验证点', required: false, desc: '验证点', example: '' },
-  { name: '前置条件', required: false, desc: '前置条件', example: '' },
-  { name: '创建人', required: false, desc: '创建人', example: '' },
-  { name: '创建时间', required: false, desc: '创建时间', example: '' },
-  { name: '最后更新人', required: false, desc: '最后更新人', example: '' },
-  { name: '最后更新时间', required: false, desc: '最后更新时间', example: '' },
-  { name: '备注', required: false, desc: '备注', example: '' }
-])
-const moveUp = (idx) => {
-  if (idx <= 0) return
-  const arr = columns.value
-  const t = arr[idx - 1]
-  arr[idx - 1] = arr[idx]
-  arr[idx] = t
-}
-const moveDown = (idx) => {
-  const arr = columns.value
-  if (idx >= arr.length - 1) return
-  const t = arr[idx + 1]
-  arr[idx + 1] = arr[idx]
-  arr[idx] = t
-}
-const removeCol = (idx) => {
-  columns.value.splice(idx, 1)
-}
-const addCol = () => {
-  columns.value.push({ name: '新列', required: false, desc: '新列描述', example: '' })
-}
-const downloadCsvTpl = () => {
-  toastType.value = 'info'
-  toastMsg.value = '模板下载功能待接入'
-  toastShow.value = true
-}
+ 
 </script>
 
 <template>
@@ -511,192 +436,164 @@ const downloadCsvTpl = () => {
     <div class="case-header">用例管理</div>
     <div class="case-desc">管理测试用例文件，支持上传、查看和编辑测试用例</div>
 
-    <section class="card">
-      <div class="card-title title-fit" @click="toggleGen">
-        从API文档生成测试用例
-        <span class="arrow" aria-hidden="true">
-          <img v-if="genOpen" class="arrow-icon" :src="caretBottom" width="16" height="16" alt="向下" />
-          <img v-else class="arrow-icon" :src="caretBottom" width="16" height="16" style="transform: rotate(-90deg);" alt="向右" />
-        </span>
-      </div>
-      <div v-show="genOpen" class="card-body">
-        <div class="form-item">
-          <label class="label">API文档文件</label>
-          <div class="file-line">
-            <label class="btn upload">
-              选择文件
-              <input ref="apiFileInput" class="hidden-file" type="file" accept=".json,.yaml,.yml" @change="onPickFile" />
-            </label>
-            <div class="file-info-wrap">
+    <CollapseCard v-model="genOpen" title="从API文档生成测试用例">
+      <el-form label-position="top">
+        <el-form-item label="API文档文件">
+          <div class="file-uploader">
+            <el-upload
+              ref="apiUploadRef"
+              :auto-upload="false"
+              :limit="1"
+              accept=".json,.yaml,.yml"
+              :on-change="onApiFileChange"
+              :on-remove="onApiFileRemove"
+            >
+              <template #trigger>
+                <el-button :icon="Upload">选择文件</el-button>
+              </template>
+            </el-upload>
+            <!-- <div class="file-info-wrap">
               <span class="file-name">{{ apiFile ? apiFile.name : '未选择任何文件' }}</span>
-              <img v-if="apiFile" :src="circleCross" class="clear-icon" @click="clearApiFile" alt="清除" />
-            </div>
+              <el-button v-if="apiFile" link type="danger" :icon="Delete" @click="clearApiFile">清空</el-button>
+            </div> -->
           </div>
-        </div>
+        </el-form-item>
+
         <div class="tips">
-          支持Swagger/OpenAPI格式
+          <span>支持Swagger/OpenAPI格式</span>
           <div class="doc-link-wrap">
             <img :src="bookOpen" class="book-icon" width="16" height="16" alt="" />
-            <a class="doc-link" href="javascript:void(0)">查看API文档格式说明</a>
+            <el-link class="doc-link" type="primary" :underline="false" href="javascript:void(0)">查看API文档格式说明</el-link>
           </div>
         </div>
-        <div class="form-item">
-          <label class="label">输出文件名</label>
-          <input class="input" v-model="outputName" />
-        </div>
-        <div>
-          <button class="btn primary" @click="genFromApiDoc">生成测试用例</button>
-        </div>
+
+        <el-form-item label="输出文件名">
+          <el-input v-model="outputName" />
+        </el-form-item>
+
+        <el-button type="primary" @click="genFromApiDoc">生成测试用例</el-button>
         <div style="margin-top:12px" v-if="genTaskId">
           <TaskCard
             title="生成用例任务"
             :status="genTaskStatus || (generating ? 'running' : '')"
             :progress="genTaskProgress"
+            :show-progress="false"
             :subtitle="outputName ? `输出前缀：${outputName}` : ''"
           >
             <div v-if="genTaskError" style="color:#ef4444">{{ genTaskError }}</div>
-            <div v-else-if="genTaskStatus === 'running' || generating">生成中：{{ genTaskProgress }}%</div>
+            <div v-else-if="genTaskStatus === 'running' || generating" class="thinking">
+              <span class="thinking-text">思考中</span>
+              <span class="thinking-dots">
+                <i></i><i></i><i></i>
+              </span>
+            </div>
             <div v-else-if="genTaskStatus === 'done' && genResult">已生成：{{ genResult.file_name }}</div>
-            <template #actions v-if="genTaskStatus === 'done' && genResult">
-              <button class="btn primary" type="button" @click="downloadGenerated">下载用例</button>
-            </template>
           </TaskCard>
-        </div>
-        <div class="gen-status" v-if="generating">
-          <div class="spinner"></div>
-          <span class="gen-text">生成中</span>
         </div>
         <div class="gen-error" v-if="genError">{{ genError }}</div>
         <div class="ai-reply" v-if="aiReply">
           <div class="ai-reply-head">
             <span class="ai-reply-title">模型回复</span>
-            <button v-if="genResult && genResult.file_name" class="btn sm" type="button" @click="viewFullAiReply">查看完整</button>
-            <button class="btn sm" type="button" @click="copyAiReply">复制</button>
+            <el-button v-if="genResult && genResult.file_name" size="small" @click="viewFullAiReply">查看完整</el-button>
+            <el-button size="small" @click="copyAiReply">复制</el-button>
           </div>
           <pre class="ai-reply-body">{{ aiReply }}</pre>
         </div>
-      </div>
-    </section>
+      </el-form>
+    </CollapseCard>
 
-    <section class="card">
-      <div class="card-title title-fit" @click="toggleUpload">
-        上传测试用例
-        <span class="arrow" aria-hidden="true">
-          <img v-if="uploadOpen" class="arrow-icon" :src="caretBottom" width="16" height="16" alt="向下" />
-          <img v-else class="arrow-icon" :src="caretBottom" width="16" height="16" style="transform: rotate(-90deg);" alt="向右" />
-        </span>
-      </div>
-      <div v-show="uploadOpen" class="card-body">
-        <div class="form-item">
-          <label class="label">选择文件</label>
-          <div class="file-line">
-            <label class="btn upload">
-              选择文件
-              <input ref="upFileInput" class="hidden-file" type="file" accept=".json,.xlsx,.csv" @change="onPickUpload" />
-            </label>
+    <CollapseCard v-model="uploadOpen" title="上传测试用例">
+      <el-form label-position="top">
+        <el-form-item label="选择文件">
+          <div class="file-uploader">
+            <el-upload
+              ref="upUploadRef"
+              :auto-upload="false"
+              :limit="1"
+              accept=".json,.xlsx,.csv"
+              :on-change="onUpFileChange"
+              :on-remove="onUpFileRemove"
+            >
+              <template #trigger>
+                <el-button :icon="Upload">选择文件</el-button>
+              </template>
+            </el-upload>
             <div class="file-info-wrap">
               <span class="file-name">{{ upFile ? upFile.name : '未选择任何文件' }}</span>
-              <img v-if="upFile" :src="circleCross" class="clear-icon" @click="clearUpFile" alt="清除" />
+              <el-button v-if="upFile" link type="danger" :icon="Delete" @click="clearUpFile">清空</el-button>
             </div>
           </div>
-        </div>
+        </el-form-item>
         <div>
-          <button class="btn primary" :disabled="uploading" @click="uploadCase">{{ uploading ? '上传中' : '上传' }}</button>
+          <el-button type="primary" :loading="uploading" :disabled="uploading" @click="uploadCase">上传</el-button>
           <span class="gen-error" v-if="uploadError" style="margin-left:8px">{{ uploadError }}</span>
         </div>
-      </div>
-    </section>
+      </el-form>
+    </CollapseCard>
 
     <CollapseCard v-model="filesOpen" title="测试用例文件">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>文件名</th>
-              <th>文件类型</th>
-              <th>大小</th>
-              <th>修改时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="f in displayedFiles" :key="f.name">
-              <td>{{ f.name }}</td>
-              <td>{{ f.type }}</td>
-              <td>{{ f.size }}</td>
-              <td>{{ f.time }}</td>
-              <td class="operation">
-                <IconButton v-if="isCsv(f.name)" :src="checkIcon" title="查看" :size="16" :button-size="28" @click="openCsvEditor(f)" />
-                <IconButton :src="downloadIcon" title="下载" :size="16" :button-size="28" @click="downloadFile(f)" />
-                <IconButton :src="deleteIcon" title="删除" :size="16" :button-size="28" @click="deleteFile(f)" />
-              </td>
-            </tr>
-            <tr v-if="uploadedFiles.length === 0">
-              <td colspan="5" class="empty">暂无文件</td>
-            </tr>
-          </tbody>
-        </table>
+      <el-table :data="displayedFiles" style="width: 100%" v-loading="false">
+        <el-table-column prop="name" label="文件名" min-width="260" show-overflow-tooltip />
+        <el-table-column prop="type" label="文件类型" width="110" />
+        <el-table-column prop="size" label="大小" width="120" />
+        <el-table-column prop="time" label="修改时间" width="180" />
+        <el-table-column label="操作" width="180">
+          <template #default="{ row }">
+            <el-button v-if="isCsv(row.name)" circle :icon="Edit" @click="openCsvEditor(row)" />
+            <el-button v-else-if="isTxt(row.name)" circle :icon="Edit" disabled />
+            <el-button circle :icon="Download" @click="downloadFile(row)" />
+            <el-button circle type="danger" :icon="Delete" @click="deleteFile(row)" />
+          </template>
+        </el-table-column>
+      </el-table>
         <Pagination v-model="currentPage" :total="totalItems" :page-size="pageSize" />
       </CollapseCard>
 
+    <!--
     <CollapseCard v-model="tplOpen" title="用例模板">
-        <div class="tool-line">
-          <button class="btn primary" @click="downloadCsvTpl">下载CSV模板</button>
-          <button class="btn success" @click="addCol">新增列</button>
-        </div>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>列名</th>
-              <th>必填</th>
-              <th>描述</th>
-              <th>示例</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(col, idx) in columns" :key="col.name + idx">
-              <td class="col-name">{{ col.name }}</td>
-              <td>{{ col.required ? '是' : '否' }}</td>
-              <td>{{ col.desc }}</td>
-              <td class="example">{{ col.example }}</td>
-              <td>
-                <button class="btn sm warn" @click="moveUp(idx)">上移</button>
-                <button class="btn sm warn" @click="moveDown(idx)">下移</button>
-                <button class="btn sm danger" @click="removeCol(idx)">删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </CollapseCard>
-    <div v-if="csvEditorOpen" class="modal-mask" @click.self="closeCsvEditor">
-      <div class="modal">
-        <div class="modal-head">
-          <div class="modal-title">编辑CSV：{{ csvEditorFileName }}</div>
-          <button class="btn sm" type="button" @click="closeCsvEditor">关闭</button>
-        </div>
-        <div class="csv-table-wrap">
-          <table class="csv-table">
-            <thead>
-              <tr>
-                <th v-for="h in csvEditorHeaders" :key="h">{{ h }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, idx) in csvEditorRows" :key="idx">
-                <td v-for="h in csvEditorHeaders" :key="h + idx">
-                  <textarea v-if="isLongCol(h)" class="cell cell-area" v-model="row[h]" spellcheck="false"></textarea>
-                  <input v-else class="cell cell-input" v-model="row[h]" />
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="modal-actions">
-          <button class="btn" type="button" @click="closeCsvEditor">取消</button>
-          <button class="btn primary" type="button" :disabled="csvEditorSaving" @click="saveCsvEditor">{{ csvEditorSaving ? '保存中' : '保存' }}</button>
-        </div>
+      <div class="tool-line">
+        <el-button type="primary" @click="downloadCsvTpl">下载CSV模板</el-button>
+        <el-button type="success" @click="addCol">新增列</el-button>
       </div>
-    </div>
+      <el-table :data="columns" style="width: 100%">
+        <el-table-column prop="name" label="列名" min-width="160" />
+        <el-table-column label="必填" width="90">
+          <template #default="{ row }">{{ row.required ? '是' : '否' }}</template>
+        </el-table-column>
+        <el-table-column prop="desc" label="描述" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="example" label="示例" min-width="200" show-overflow-tooltip />
+        <el-table-column label="操作" width="220">
+          <template #default="{ $index }">
+            <el-button size="small" @click="moveUp($index)">上移</el-button>
+            <el-button size="small" @click="moveDown($index)">下移</el-button>
+            <el-button size="small" type="danger" @click="removeCol($index)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </CollapseCard>
+    -->
+    <Modal
+      :show="csvEditorOpen"
+      :title="`编辑CSV：${csvEditorFileName}`"
+      width="90%"
+      @close="closeCsvEditor"
+      @confirm="saveCsvEditor"
+    >
+      <el-table :data="csvEditorRows" style="width: 100%" max-height="60vh">
+        <el-table-column v-for="h in csvEditorHeaders" :key="h" :prop="h" :label="h" min-width="160">
+          <template #default="{ row }">
+            <el-input v-if="isLongCol(h)" v-model="row[h]" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" />
+            <el-input v-else v-model="row[h]" />
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <div class="csv-footer">
+          <el-button @click="closeCsvEditor">取消</el-button>
+          <el-button type="primary" :loading="csvEditorSaving" :disabled="csvEditorSaving" @click="saveCsvEditor">保存</el-button>
+        </div>
+      </template>
+    </Modal>
   </div>
 </template>
 
@@ -795,6 +692,54 @@ const downloadCsvTpl = () => {
   border-radius: 6px;
   padding: 4px 8px;
   width: 100%;
+}
+.file-uploader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+}
+.thinking-text {
+  font-size: 13px;
+  font-weight: 600;
+}
+.thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.thinking-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+  opacity: 0.35;
+  animation: thinking-bounce 1.1s infinite ease-in-out;
+}
+.thinking-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.thinking-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes thinking-bounce {
+  0%, 100% { transform: translateY(0); opacity: 0.35; }
+  50% { transform: translateY(-4px); opacity: 1; }
+}
+.csv-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 .btn {
   height: 36px;

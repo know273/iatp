@@ -2,7 +2,9 @@
 const props = defineProps({
   show: { type: Boolean, default: false },
   title: { type: String, default: '' },
-  width: { type: String, default: '500px' }
+  width: { type: String, default: '500px' },
+  cancelText: { type: String, default: '取消' },
+  confirmText: { type: String, default: '确定' }
 })
 const emit = defineEmits(['close', 'confirm'])
 </script>
@@ -20,8 +22,8 @@ const emit = defineEmits(['close', 'confirm'])
     <slot />
     <template #footer>
       <div class="modal-footer">
-        <el-button @click="emit('close')">取消</el-button>
-        <el-button type="primary" @click="emit('confirm')">确定</el-button>
+        <el-button @click="emit('close')">{{ props.cancelText }}</el-button>
+        <el-button type="primary" @click="emit('confirm')">{{ props.confirmText }}</el-button>
       </div>
     </template>
   </el-dialog>

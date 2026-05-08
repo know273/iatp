@@ -9,7 +9,7 @@ import { ElMessageBox } from 'element-plus'
 import { apiFetch } from '../utils/api'
 
 const apiBase = computed(() => import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000')
-const baseUrl = computed(() => localStorage.getItem('baseUrl') || '')
+const legacyBaseUrl = computed(() => localStorage.getItem('baseUrl') || '')
 const toAbsUrl = (base, rel) => {
   const p = String(rel || '').replace(/^\\+|^\/+/, '').replace(/\\/g, '/')
   return `${String(base).replace(/\/$/, '')}/${p}`
@@ -18,6 +18,15 @@ const toAbsUrl = (base, rel) => {
 const files = ref([])
 const selectedFile = ref(files.value[0] || '')
 const env = ref('test')
+const envConfigs = ref([])
+const selectedEnvId = ref('')
+const defaultEnvId = ref('')
+const effectiveBaseUrl = computed(() => {
+  const id = String(selectedEnvId.value || '')
+  const found = envConfigs.value.find(x => String(x.env_id) === id)
+  const v = String((found && found.base_url) || legacyBaseUrl.value || '').trim().replace(/\/$/, '')
+  return v
+})
 const running = ref(false)
 const success = ref(false)
 const taskId = ref('')
@@ -58,7 +67,7 @@ const baseName = (p) => {
 
 const startRun = async () => {
   if (!selectedFile.value) return
-  if (!baseUrl.value) return
+  if (!effectiveBaseUrl.value) return
   running.value = true
   success.value = false
   taskError.value = ''
@@ -67,7 +76,8 @@ const startRun = async () => {
     const body = {
       file_name: selectedFile.value,
       env: env.value,
-      base_url: baseUrl.value
+      env_id: selectedEnvId.value || '',
+      base_url: effectiveBaseUrl.value
     }
     const res = await apiFetch(`${apiBase.value}/api/execute/run-async`, {
       method: 'POST',
@@ -177,6 +187,7 @@ const loadHistory = async () => {
       passed: x.passed || '',
       failed: x.failed || '',
       passRate: x.pass_rate || '',
+      failureSummary: x.failure_summary || '',
       reportUrl: ''
     }))
     currentPage.value = 1
@@ -203,8 +214,20 @@ const deleteHistoryReport = async (item) => {
   }
 }
 
+const loadEnvConfigs = async () => {
+  try {
+    const res = await apiFetch(`${apiBase.value}/api/envs`)
+    if (!res.ok) return
+    const data = await res.json()
+    envConfigs.value = Array.isArray(data.envs) ? data.envs : []
+    defaultEnvId.value = String(data.default_env_id || '')
+    if (!selectedEnvId.value) selectedEnvId.value = defaultEnvId.value || (envConfigs.value[0] && envConfigs.value[0].env_id) || ''
+  } catch (_) {}
+}
+
 onMounted(() => {
   loadFiles()
+  loadEnvConfigs()
   loadHistory()
 })
 </script>
@@ -232,9 +255,20 @@ onMounted(() => {
               <el-option label="生产环境" value="prod" />
             </el-select>
           </el-form-item>
-          <el-form-item label="Base URL(来自配置管理)">
+          <el-form-item label="环境配置">
+            <el-select v-model="selectedEnvId" placeholder="选择环境" style="width: 520px; max-width: 100%">
+              <el-option label="未选择" value="" />
+              <el-option
+                v-for="e in envConfigs"
+                :key="e.env_id"
+                :label="`${e.name || '未命名环境'}  (${e.base_url || ''})`"
+                :value="e.env_id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Base URL(来自环境配置)">
             <div class="base-url-wrap">
-              <el-input :model-value="baseUrl" disabled style="width: 520px; max-width: 100%" />
+              <el-input :model-value="effectiveBaseUrl" disabled style="width: 520px; max-width: 100%" />
               <div class="tips">用于拼接完整接口: Base URL(基础URL) + URL参数</div>
             </div>
           </el-form-item>
@@ -281,6 +315,7 @@ onMounted(() => {
           <el-table-column prop="passed" label="通过数" width="90" />
           <el-table-column prop="failed" label="失败数" width="90" />
           <el-table-column prop="passRate" label="通过率" width="90" />
+          <el-table-column prop="failureSummary" label="失败原因" min-width="260" show-overflow-tooltip />
           <el-table-column label="操作" width="120">
             <template #default="{ row }">
               <el-button circle :icon="View" @click="viewReport(row)" />

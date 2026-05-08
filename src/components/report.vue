@@ -2,8 +2,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import Toast from './ui/Toast.vue'
+import Modal from './ui/Modal.vue'
 import Pagination from './ui/Pagination.vue'
-import { View, Delete } from '@element-plus/icons-vue'
+import { View, Delete, Link } from '@element-plus/icons-vue'
 import { apiFetch } from '../utils/api'
 import { setHtmlReportCount } from '../stores/systemStats'
 
@@ -24,6 +25,9 @@ const pagedReports = computed(() => {
 const toastShow = ref(false)
 const toastMsg = ref('')
 const toastType = ref('success')
+const shareOpen = ref(false)
+const shareLink = ref('')
+const shareInputRef = ref(null)
 
 const ensureQueryReport = () => {
   const name = route.query?.name
@@ -68,6 +72,83 @@ const openReport = async (item) => {
   } catch (_) {
     toastType.value = 'error'
     toastMsg.value = '打开失败'
+    toastShow.value = true
+  }
+}
+
+const _copyText = async (text) => {
+  const v = String(text || '')
+  if (!v) throw new Error('empty')
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(v)
+      return
+    } catch (_) {
+    }
+  }
+  const el = document.createElement('textarea')
+  el.value = v
+  el.setAttribute('readonly', 'true')
+  el.style.position = 'fixed'
+  el.style.left = '-9999px'
+  el.style.top = '-9999px'
+  document.body.appendChild(el)
+  el.select()
+  const ok = document.execCommand('copy')
+  document.body.removeChild(el)
+  if (!ok) throw new Error('copy failed')
+}
+
+const shareReport = async (item) => {
+  const token = localStorage.getItem('token') || ''
+  const refreshToken = localStorage.getItem('refresh_token') || ''
+  if ((!token || token.split('.').length !== 3) && (!refreshToken || refreshToken.split('.').length !== 3)) {
+    toastType.value = 'error'
+    toastMsg.value = '请先登录'
+    toastShow.value = true
+    return
+  }
+  try {
+    const res = await apiFetch(`${apiBase.value}/api/reports/report/share-url?report_name=${encodeURIComponent(item.reportName)}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    if (!data || !data.url) throw new Error('missing url')
+    const link = toAbsUrl(apiBase.value, data.url)
+    shareLink.value = link
+    try {
+      await _copyText(link)
+      toastType.value = 'success'
+      toastMsg.value = '报告链接已复制'
+      toastShow.value = true
+    } catch (_) {
+      shareOpen.value = true
+    }
+  } catch (_) {
+    toastType.value = 'error'
+    toastMsg.value = '复制失败'
+    toastShow.value = true
+  }
+}
+
+const confirmShareCopy = async () => {
+  try {
+    await _copyText(shareLink.value)
+    toastType.value = 'success'
+    toastMsg.value = '复制成功'
+    toastShow.value = true
+    shareOpen.value = false
+  } catch (_) {
+    shareOpen.value = true
+    try {
+      const inst = shareInputRef.value
+      const input = inst && inst.input ? inst.input : null
+      if (input && input.focus && input.select) {
+        input.focus()
+        input.select()
+      }
+    } catch (_) {}
+    toastType.value = 'error'
+    toastMsg.value = '请手动复制'
     toastShow.value = true
   }
 }
@@ -117,6 +198,12 @@ const removeReport = async (idx) => {
 <template>
   <div class="page-full">
     <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
+    <Modal :show="shareOpen" title="分享测试报告" width="720px" confirm-text="复制" @close="shareOpen = false" @confirm="confirmShareCopy">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="color:#64748b;font-size:13px">复制下面链接发给别人，对方可直接打开查看报告</div>
+        <el-input ref="shareInputRef" :model-value="shareLink" readonly />
+      </div>
+    </Modal>
     <div class="page-full-title">测试报告</div>
     <div class="page-subtitle">查看和管理测试报告</div>
     <el-card class="card" shadow="never">
@@ -132,6 +219,7 @@ const removeReport = async (idx) => {
             <template #default="{ row, $index }">
               <div class="operation">
                 <el-button circle :icon="View" @click="openReport(row)" />
+                <el-button circle :icon="Link" @click="shareReport(row)" />
                 <el-button circle type="danger" :icon="Delete" @click="removeReport($index)" />
               </div>
             </template>
@@ -155,17 +243,18 @@ const removeReport = async (idx) => {
   background: #fff;
 }
 .page-full-title {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 700;
   color: #333;
-  padding: 16px;
-  border-bottom: 1px solid #e8e8e8;
+  padding: 16px 16px 0;
+  border-bottom: none;
+  margin-bottom: 6px;
   text-align: left;
 }
 .page-subtitle {
-  font-size: 14px;
+  font-size: 16px;
   color: #777;
-  padding: 12px 16px;
+  padding: 0 16px;
   text-align: left;
 }
 .page-full-body {

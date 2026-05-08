@@ -98,6 +98,127 @@ const authHeaders = () => {
 
 const apiBaseUrl = computed(() => String(import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000').replace(/\/$/, ''))
 
+const envs = ref([])
+const defaultEnvId = ref('')
+const envLoading = ref(false)
+const envDialogOpen = ref(false)
+const envSaving = ref(false)
+const envDraft = ref({ env_id: '', name: '', base_url: '', headersText: '{}' })
+
+const loadEnvs = async () => {
+  const headers = authHeaders()
+  if (!headers) return
+  envLoading.value = true
+  try {
+    const res = await apiFetch(`${apiBaseUrl.value}/api/envs`, { headers })
+    if (!res.ok) return
+    const data = await res.json().catch(() => ({}))
+    envs.value = Array.isArray(data.envs) ? data.envs : []
+    defaultEnvId.value = String(data.default_env_id || '')
+    const def = envs.value.find(x => String(x.env_id) === String(defaultEnvId.value))
+    if (def && def.base_url) {
+      const v = String(def.base_url || '').trim().replace(/\/$/, '')
+      if (v) {
+        localStorage.setItem('baseUrl', v)
+        baseUrl.value = v
+        loadBaseUrlOptions()
+      }
+    }
+  } finally {
+    envLoading.value = false
+  }
+}
+
+const openCreateEnv = () => {
+  envDraft.value = { env_id: '', name: '测试环境', base_url: baseUrl.value || '', headersText: '{}' }
+  envDialogOpen.value = true
+}
+
+const openEditEnv = (e) => {
+  envDraft.value = {
+    env_id: String(e.env_id || ''),
+    name: String(e.name || ''),
+    base_url: String(e.base_url || ''),
+    headersText: JSON.stringify(e.headers || {}, null, 2)
+  }
+  envDialogOpen.value = true
+}
+
+const saveEnv = async () => {
+  const headers = authHeaders()
+  if (!headers) return
+  envSaving.value = true
+  try {
+    let headersObj = {}
+    try {
+      headersObj = JSON.parse(String(envDraft.value.headersText || '{}'))
+    } catch (e) {
+      showToast('请求头必须是 JSON', 'error')
+      return
+    }
+    const payload = {
+      name: String(envDraft.value.name || '').trim(),
+      base_url: String(envDraft.value.base_url || '').trim().replace(/\/$/, ''),
+      headers: headersObj
+    }
+    const isEdit = Boolean(envDraft.value.env_id)
+    const url = isEdit
+      ? `${apiBaseUrl.value}/api/envs/${encodeURIComponent(envDraft.value.env_id)}`
+      : `${apiBaseUrl.value}/api/envs`
+    const res = await apiFetch(url, {
+      method: isEdit ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) {
+      showToast('保存失败', 'error')
+      return
+    }
+    envDialogOpen.value = false
+    await loadEnvs()
+    showToast('已保存', 'success')
+  } finally {
+    envSaving.value = false
+  }
+}
+
+const deleteEnv = async (e) => {
+  const headers = authHeaders()
+  if (!headers) return
+  const id = String(e.env_id || '')
+  if (!id) return
+  try {
+    const res = await apiFetch(`${apiBaseUrl.value}/api/envs/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers
+    })
+    if (!res.ok) throw new Error('delete failed')
+    await loadEnvs()
+    showToast('删除成功', 'success')
+  } catch (err) {
+    showToast('删除失败', 'error')
+  }
+}
+
+const setDefaultEnv = async (e) => {
+  const headers = authHeaders()
+  if (!headers) return
+  const id = String(e.env_id || '')
+  if (!id) return
+  try {
+    const res = await apiFetch(`${apiBaseUrl.value}/api/envs/default`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ env_id: id })
+    })
+    if (!res.ok) throw new Error('set default failed')
+    await loadEnvs()
+    showToast('已设为默认环境', 'success')
+  } catch (err) {
+    showToast('设置失败', 'error')
+  }
+}
+
 const persistModelsConfig = () => {
   localStorage.setItem(
     storeKey,
@@ -344,6 +465,7 @@ const loadFromServer = async () => {
 
 onMounted(() => {
   loadBaseUrlOptions()
+  loadEnvs()
   loadFromServer()
 })
 </script>
@@ -352,6 +474,7 @@ onMounted(() => {
   <div class="page-full">
     <Toast v-model:show="toastShow" :message="toastMsg" :type="toastType" />
     <div class="page-full-title">配置管理</div>
+    <div class="page-subtitle">配置大模型与测试环境</div>
     <div class="page-full-body">
       <!-- 基础设置 -->
       <div class="section-group">
@@ -379,6 +502,50 @@ onMounted(() => {
         </div>
         <div class="ok" v-if="saved">已保存</div>
         <div class="err" v-if="error">{{ error }}</div>
+      </div>
+
+      <div class="section-group">
+        <div class="section-title">环境配置</div>
+        <el-card class="ai-card" shadow="never">
+          <div class="card-header card-header-row">
+            <span>环境列表</span>
+            <el-button type="primary" plain :icon="Plus" @click="openCreateEnv">添加环境</el-button>
+          </div>
+          <el-table :data="envs" v-loading="envLoading" style="width: 100%">
+            <el-table-column prop="name" label="名称" min-width="140" />
+            <el-table-column prop="base_url" label="Base URL" min-width="220" />
+            <el-table-column label="默认" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="String(row.env_id) === String(defaultEnvId)" type="success">默认</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" min-width="200">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="setDefaultEnv(row)">设为默认</el-button>
+                <el-button link @click="openEditEnv(row)">编辑</el-button>
+                <el-button link type="danger" @click="deleteEnv(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+
+        <el-dialog v-model="envDialogOpen" title="环境配置" width="560px">
+          <el-form label-position="top">
+            <el-form-item label="名称">
+              <el-input v-model="envDraft.name" placeholder="例如：测试环境" />
+            </el-form-item>
+            <el-form-item label="Base URL">
+              <el-input v-model="envDraft.base_url" placeholder="例如：http://127.0.0.1:5000" />
+            </el-form-item>
+            <el-form-item label="公共请求头（JSON）">
+              <el-input v-model="envDraft.headersText" type="textarea" :rows="6" placeholder='例如：{"Authorization":"Bearer xxx"}' />
+            </el-form-item>
+          </el-form>
+          <template #footer>
+            <el-button :disabled="envSaving" @click="envDialogOpen = false">取消</el-button>
+            <el-button type="primary" :loading="envSaving" :disabled="envSaving" @click="saveEnv">保存</el-button>
+          </template>
+        </el-dialog>
       </div>
 
       <!-- AI 功能设置 -->
@@ -464,16 +631,24 @@ onMounted(() => {
   background: #f8fafc;
 }
 .page-full-title {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 700;
   color: #333;
-  padding: 16px 24px;
-  background: #fff;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 16px 16px 0;
+  background: transparent;
+  border-bottom: none;
+  margin-bottom: 6px;
+  text-align: left;
+}
+.page-subtitle {
+  font-size: 16px;
+  color: #777;
+  padding: 0 16px;
+  text-align: left;
 }
 .page-full-body {
   flex: 1;
-  padding: 24px;
+  padding: 0 16px;
   color: #333;
   overflow-y: auto;
 }
@@ -497,7 +672,7 @@ onMounted(() => {
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .label-row .label {
   margin-bottom: 0;
@@ -506,7 +681,7 @@ onMounted(() => {
   display: block;
   color: #64748b;
   font-size: 14px;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 .label-link {
   display: inline-flex;

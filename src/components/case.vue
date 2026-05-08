@@ -245,6 +245,116 @@ const isLongCol = (h) => {
   return name.includes('参数') || name.includes('结果') || name.includes('URL')
 }
 
+const CFG_HEADERS_COL = '请求头'
+const CFG_ASSERT_COL = '断言'
+const CFG_EXTRACT_COL = '提取变量'
+const isConfigCol = (h) => {
+  const k = String(h || '')
+  return k === CFG_HEADERS_COL || k === CFG_ASSERT_COL || k === CFG_EXTRACT_COL
+}
+
+const ensureConfigColumns = (headers, body) => {
+  const hs = Array.isArray(headers) ? headers : []
+  const rows = Array.isArray(body) ? body : []
+  const need = [CFG_HEADERS_COL, CFG_ASSERT_COL, CFG_EXTRACT_COL]
+  for (const k of need) {
+    if (!hs.includes(k)) hs.push(k)
+  }
+  for (const r of rows) {
+    for (const k of need) {
+      if (r && typeof r === 'object' && !(k in r)) r[k] = ''
+    }
+  }
+  return { headers: hs, body: rows }
+}
+
+const cfgEditorOpen = ref(false)
+const cfgEditorCol = ref('')
+const cfgEditorRow = ref(null)
+const cfgHeadersPairs = ref([{ key: '', value: '' }])
+const cfgAssertions = ref([])
+const cfgExtractors = ref([])
+
+const _tryJson = (s, fallback) => {
+  try {
+    return JSON.parse(String(s || ''))
+  } catch (_) {
+    return fallback
+  }
+}
+
+const openCfgEditor = (row, col) => {
+  cfgEditorRow.value = row || null
+  cfgEditorCol.value = String(col || '')
+  const raw = row && cfgEditorCol.value ? row[cfgEditorCol.value] : ''
+  if (cfgEditorCol.value === CFG_HEADERS_COL) {
+    const obj = raw ? _tryJson(raw, {}) : {}
+    const entries = obj && typeof obj === 'object' && !Array.isArray(obj) ? Object.entries(obj) : []
+    cfgHeadersPairs.value = entries.length ? entries.map(([k, v]) => ({ key: String(k || ''), value: v === null || v === undefined ? '' : String(v) })) : [{ key: '', value: '' }]
+  } else if (cfgEditorCol.value === CFG_ASSERT_COL) {
+    const arr = raw ? _tryJson(raw, []) : []
+    cfgAssertions.value = Array.isArray(arr) ? arr.filter(x => x && typeof x === 'object') : []
+    if (!cfgAssertions.value.length) cfgAssertions.value = [{ type: 'status_code', equals: 200 }]
+  } else if (cfgEditorCol.value === CFG_EXTRACT_COL) {
+    const arr = raw ? _tryJson(raw, []) : []
+    cfgExtractors.value = Array.isArray(arr) ? arr.filter(x => x && typeof x === 'object') : []
+    if (!cfgExtractors.value.length) cfgExtractors.value = [{ var: 'token', from: 'json', path: 'data.token' }]
+  }
+  cfgEditorOpen.value = true
+}
+
+const addHeaderPair = () => {
+  cfgHeadersPairs.value.push({ key: '', value: '' })
+}
+const removeHeaderPair = (idx) => {
+  cfgHeadersPairs.value.splice(idx, 1)
+  if (!cfgHeadersPairs.value.length) cfgHeadersPairs.value = [{ key: '', value: '' }]
+}
+const addAssertion = () => {
+  cfgAssertions.value.push({ type: 'status_code', equals: 200 })
+}
+const removeAssertion = (idx) => {
+  cfgAssertions.value.splice(idx, 1)
+  if (!cfgAssertions.value.length) cfgAssertions.value = [{ type: 'status_code', equals: 200 }]
+}
+const addExtractor = () => {
+  cfgExtractors.value.push({ var: 'id', from: 'json', path: 'data.id' })
+}
+const removeExtractor = (idx) => {
+  cfgExtractors.value.splice(idx, 1)
+  if (!cfgExtractors.value.length) cfgExtractors.value = [{ var: 'token', from: 'json', path: 'data.token' }]
+}
+
+const saveCfgEditor = () => {
+  const row = cfgEditorRow.value
+  const col = cfgEditorCol.value
+  if (!row || !col) return
+  if (col === CFG_HEADERS_COL) {
+    const out = {}
+    for (const it of cfgHeadersPairs.value || []) {
+      const k = String(it && it.key ? it.key : '').trim()
+      if (!k) continue
+      out[k] = String(it && it.value !== undefined ? it.value : '')
+    }
+    row[col] = Object.keys(out).length ? JSON.stringify(out) : ''
+  } else if (col === CFG_ASSERT_COL) {
+    const cleaned = (cfgAssertions.value || []).filter(x => x && typeof x === 'object' && String(x.type || '').trim())
+    row[col] = cleaned.length ? JSON.stringify(cleaned) : ''
+  } else if (col === CFG_EXTRACT_COL) {
+    const cleaned = (cfgExtractors.value || [])
+      .filter(x => x && typeof x === 'object')
+      .map(x => ({
+        var: String(x.var || '').trim(),
+        from: String(x.from || 'json').trim(),
+        path: String(x.path || '').trim(),
+        name: String(x.name || '').trim()
+      }))
+      .filter(x => x.var && (x.from === 'header' ? x.name : x.path))
+    row[col] = cleaned.length ? JSON.stringify(cleaned) : ''
+  }
+  cfgEditorOpen.value = false
+}
+
 const openCsvEditor = async (f) => {
   const name = f && f.name ? String(f.name) : ''
   if (!name) return
@@ -260,8 +370,9 @@ const openCsvEditor = async (f) => {
   if (csvCache.has(name)) {
     const cached = csvCache.get(name) || null
     if (cached && cached.headers && cached.body) {
-      csvEditorHeaders.value = cached.headers
-      csvEditorRows.value = cached.body
+      const ensured = ensureConfigColumns(cached.headers, cached.body)
+      csvEditorHeaders.value = ensured.headers
+      csvEditorRows.value = ensured.body
       csvEditorText.value = cached.text || ''
       return
     }
@@ -274,8 +385,9 @@ const openCsvEditor = async (f) => {
     const data = await res.json()
     csvEditorText.value = data && data.csv ? String(data.csv) : ''
     const parsed = parseCsv(csvEditorText.value)
-    csvEditorHeaders.value = parsed.headers
-    csvEditorRows.value = parsed.body
+    const ensured = ensureConfigColumns(parsed.headers, parsed.body)
+    csvEditorHeaders.value = ensured.headers
+    csvEditorRows.value = ensured.body
     csvCache.set(name, { text: csvEditorText.value, headers: csvEditorHeaders.value, body: csvEditorRows.value })
   } catch (_) {
     toastType.value = 'error'
@@ -582,7 +694,11 @@ const downloadFile = async (f) => {
       <el-table :data="csvEditorRows" style="width: 100%" max-height="60vh">
         <el-table-column v-for="h in csvEditorHeaders" :key="h" :prop="h" :label="h" min-width="160">
           <template #default="{ row }">
-            <el-input v-if="isLongCol(h)" v-model="row[h]" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" />
+            <template v-if="isConfigCol(h)">
+              <el-button link type="primary" @click="openCfgEditor(row, h)">{{ row[h] ? '编辑' : '配置' }}</el-button>
+              <span v-if="row[h]" style="margin-left:8px;color:#10b981">已配置</span>
+            </template>
+            <el-input v-else-if="isLongCol(h)" v-model="row[h]" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" />
             <el-input v-else v-model="row[h]" />
           </template>
         </el-table-column>
@@ -591,6 +707,80 @@ const downloadFile = async (f) => {
         <div class="csv-footer">
           <el-button @click="closeCsvEditor">取消</el-button>
           <el-button type="primary" :loading="csvEditorSaving" :disabled="csvEditorSaving" @click="saveCsvEditor">保存</el-button>
+        </div>
+      </template>
+    </Modal>
+
+    <Modal
+      :show="cfgEditorOpen"
+      :title="cfgEditorCol ? `配置：${cfgEditorCol}` : '配置'"
+      width="720px"
+      @close="cfgEditorOpen = false"
+      @confirm="saveCfgEditor"
+    >
+      <div v-if="cfgEditorCol === CFG_HEADERS_COL">
+        <div v-for="(it, idx) in cfgHeadersPairs" :key="idx" style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+          <el-input v-model="it.key" placeholder="Header Key" style="width: 240px" />
+          <el-input v-model="it.value" placeholder="Header Value" style="flex: 1" />
+          <el-button type="danger" plain @click="removeHeaderPair(idx)">删除</el-button>
+        </div>
+        <el-button type="primary" plain @click="addHeaderPair">新增一行</el-button>
+      </div>
+
+      <div v-else-if="cfgEditorCol === CFG_ASSERT_COL">
+        <div v-for="(a, idx) in cfgAssertions" :key="idx" style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:12px">
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+            <el-select v-model="a.type" style="width: 180px">
+              <el-option label="状态码" value="status_code" />
+              <el-option label="耗时(ms)" value="time_ms" />
+              <el-option label="包含文本" value="contains" />
+              <el-option label="不包含文本" value="not_contains" />
+              <el-option label="JSON字段" value="json_path" />
+            </el-select>
+            <el-button type="danger" plain @click="removeAssertion(idx)">删除</el-button>
+          </div>
+          <div v-if="a.type === 'status_code'">
+            <el-input v-model="a.equals" placeholder="equals，例如：200" />
+          </div>
+          <div v-else-if="a.type === 'time_ms'">
+            <el-input v-model="a.lte" placeholder="lte，例如：2000" />
+          </div>
+          <div v-else-if="a.type === 'contains' || a.type === 'not_contains'">
+            <el-input v-model="a.text" placeholder="文本关键字" />
+          </div>
+          <div v-else-if="a.type === 'json_path'">
+            <el-input v-model="a.path" placeholder="path，例如：data.code" />
+            <div style="height:10px"></div>
+            <el-input v-model="a.equals" placeholder="equals（可选），例如：0" />
+          </div>
+        </div>
+        <el-button type="primary" plain @click="addAssertion">新增断言</el-button>
+      </div>
+
+      <div v-else-if="cfgEditorCol === CFG_EXTRACT_COL">
+        <div v-for="(e, idx) in cfgExtractors" :key="idx" style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:12px">
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+            <el-input v-model="e.var" placeholder="变量名，例如：token" style="width: 220px" />
+            <el-select v-model="e.from" style="width: 160px">
+              <el-option label="JSON" value="json" />
+              <el-option label="Header" value="header" />
+            </el-select>
+            <el-button type="danger" plain @click="removeExtractor(idx)">删除</el-button>
+          </div>
+          <div v-if="e.from === 'header'">
+            <el-input v-model="e.name" placeholder="Header 名称，例如：Authorization" />
+          </div>
+          <div v-else>
+            <el-input v-model="e.path" placeholder="JSON path，例如：data.token" />
+          </div>
+        </div>
+        <el-button type="primary" plain @click="addExtractor">新增提取</el-button>
+      </div>
+
+      <template #footer>
+        <div class="csv-footer">
+          <el-button @click="cfgEditorOpen = false">取消</el-button>
+          <el-button type="primary" @click="saveCfgEditor">保存</el-button>
         </div>
       </template>
     </Modal>
